@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      migrate_ezvm32:
+        description: Migrate the digest-pinned reviewed EZVM .32 factory into RiftVM
+        required: false
+        default: false
+        type: boolean
       base_release_tag:
         description: Optional verified release to rebake when only RiftVM integration changed
         required: false
@@ -91,10 +96,19 @@ jobs:
       - name: Resolve optional integration-only base
         id: base
         env:
+          MIGRATE_EZVM32: ${{ inputs.migrate_ezvm32 }}
           BASE_RELEASE_TAG: ${{ inputs.base_release_tag }}
           BASE_IMAGE_SHA256: ${{ inputs.base_image_sha256 }}
         run: |
           set -euo pipefail
+          if [[ "$MIGRATE_EZVM32" == true ]]; then
+            [[ -z "$BASE_RELEASE_TAG" && -z "$BASE_IMAGE_SHA256" ]] || { echo 'Do not combine legacy migration and another base.' >&2; exit 1; }
+            echo 'use_rebake=true' >> "$GITHUB_OUTPUT"
+            echo 'legacy=true' >> "$GITHUB_OUTPUT"
+            echo 'tag=v4.0.0-alpha-ezvm.32' >> "$GITHUB_OUTPUT"
+            echo 'sha256=1ad443730ea340eaa7003b01c26ea142434b0f88a4280bd34fb8909e32d9b0a9' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ -z "$BASE_RELEASE_TAG" && -z "$BASE_IMAGE_SHA256" ]]; then
             echo 'use_rebake=false' >> "$GITHUB_OUTPUT"
             exit 0
@@ -226,15 +240,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/base-release
-          gh release download "$BASE_RELEASE_TAG" --dir build/base-release
-          ./bin/reconstruct-riftvm-release \
+          legacy_args=()
+          if [[ '${{ steps.base.outputs.legacy }}' == true ]]; then
+            gh release download "$BASE_RELEASE_TAG" --repo everettjf/omarchy-aarch64-image --dir build/base-release \
+              --pattern ezvm-release-manifest.json --pattern image-provenance.txt --pattern 'Omarchy-ezvm.sparse.gz.part-*' \
+              --pattern '*.packages.tsv' --pattern '*.all-packages.txt' --pattern '*.explicit-packages.txt'
+            legacy_args=(--legacy-ezvm32)
+          else
+            gh release download "$BASE_RELEASE_TAG" --dir build/base-release
+          fi
+          ./bin/reconstruct-riftvm-release "${legacy_args[@]}" \
             --assets build/base-release \
             --output build/base.raw \
             --tag "$BASE_RELEASE_TAG" \
             --sha256 "$BASE_IMAGE_SHA256"
 
       - name: Prove integration-only change scope
-        if: steps.base.outputs.use_rebake == 'true'
+        if: steps.base.outputs.use_rebake == 'true' && steps.base.outputs.legacy != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_RELEASE_TAG: ${{ steps.base.outputs.tag }}
@@ -280,7 +302,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$USE_REBAKE" == true ]]; then
-            ./bin/rebake-riftvm-integration-container \
+            legacy_args=()
+            if [[ '${{ steps.base.outputs.legacy }}' == true ]]; then legacy_args=(--legacy-ezvm32); fi
+            ./bin/rebake-riftvm-integration-container "${legacy_args[@]}" \
               --base-image build/base.raw \
               --base-sha256 "$BASE_IMAGE_SHA256" \
               --output build/omarchy-aarch64-riftvm.raw \

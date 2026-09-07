@@ -28,7 +28,7 @@ while (($#)); do
       args+=("$1" "$2")
       shift 2
       ;;
-    --force)
+    --force | --legacy-ezvm32)
       args+=("$1")
       shift
       ;;
@@ -49,6 +49,6 @@ exec docker run --rm --privileged --user root \
   "$BUILDER_IMAGE" \
   bash -lc '
     set -euo pipefail
-    pacman -Syu --needed --noconfirm btrfs-progs util-linux
+    pacman -Syu --needed --noconfirm btrfs-progs util-linux python
     exec /project/bin/rebake-riftvm-integration "$@"
   ' rebake-riftvm-integration "${args[@]}"

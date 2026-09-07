@@ -12,6 +12,7 @@ AGENT_SOURCE_REF=""
 EXPECTED_OMARCHY_REF=""
 EXPECTED_WL_COPY_REF=""
 FORCE=0
+LEGACY_EZVM32=0
 LOOP_DEVICE=""
 TOP_LEVEL=""
 STAGED_IMAGE=""
@@ -59,6 +60,7 @@ parse_args() {
       --agent-source-ref) (($# >= 2)) || fail "--agent-source-ref requires a commit"; AGENT_SOURCE_REF=$2; shift 2 ;;
       --expected-omarchy-ref) (($# >= 2)) || fail "--expected-omarchy-ref requires a commit"; EXPECTED_OMARCHY_REF=$2; shift 2 ;;
       --expected-wl-copy-ref) (($# >= 2)) || fail "--expected-wl-copy-ref requires a commit"; EXPECTED_WL_COPY_REF=$2; shift 2 ;;
+      --legacy-ezvm32) LEGACY_EZVM32=1; shift ;;
       --force) FORCE=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) fail "unknown option: $1" ;;
@@ -87,6 +89,9 @@ validate_inputs() {
   fi
   file "$AGENT_BINARY" | grep -Eq 'ELF 64-bit.*ARM aarch64.*statically linked' ||
     fail "Guest Agent must be a statically linked Linux ARM64 executable"
+  if ((LEGACY_EZVM32)); then
+    [[ $BASE_SHA256 == 1ad443730ea340eaa7003b01c26ea142434b0f88a4280bd34fb8909e32d9b0a9 ]] || fail "migration requires the reviewed EZVM .32 base"
+  fi
   actual=$(sha256sum "$BASE_IMAGE" | awk '{print $1}')
   [[ $actual == "$BASE_SHA256" ]] || fail "base image SHA-256 mismatch"
 }
@@ -213,6 +218,11 @@ rebake_image() {
   factory="$TOP_LEVEL/@factory"
   [[ -d $root && -d $factory ]] || fail "base image lacks @ or @factory Btrfs subvolume"
   [[ $(btrfs property get -ts "$factory" ro) == 'ro=true' ]] || fail "base factory snapshot is not read-only"
+  if ((LEGACY_EZVM32)); then
+    grep -qxF "omarchy_source_ref=$EXPECTED_OMARCHY_REF" "$root/usr/share/omarchy-aarch64/image-build.txt" || fail "legacy Omarchy input differs"
+    grep -qxF "ezvm_wl_copy_source_ref=$EXPECTED_WL_COPY_REF" "$root/usr/share/omarchy-aarch64/image-build.txt" || fail "legacy wl-copy input differs"
+    python3 "$(dirname -- "${BASH_SOURCE[0]}")/migrate-ezvm32-root" "$root"
+  fi
   [[ -f $root/usr/local/sbin/rift-agent && ! -L $root/usr/local/sbin/rift-agent ]] ||
     fail "base Guest Agent path is missing or unsafe"
   validate_base_provenance "$root/usr/share/omarchy-aarch64/image-build.txt"

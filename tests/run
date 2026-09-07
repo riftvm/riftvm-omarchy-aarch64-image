@@ -1081,3 +1081,4 @@ if printf 'EZVM-SPARSE-1\n8\nEND\n' | perl "$ROOT/bin/decode-riftvm-sparse" "$le
 fi
 rm -rf -- "$legacy_fixture"
 pass "legacy factory decoding requires explicit migration mode"
+python3 "$ROOT/tests/migrate-ezvm32.py"
