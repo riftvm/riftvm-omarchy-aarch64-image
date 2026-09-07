@@ -1,4 +1,4 @@
-name: Publish AArch64 EZVM image
+name: Publish AArch64 RiftVM image
 
 on:
   push:
@@ -7,8 +7,21 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to create (for example v4.0.1-ezvm.11)
+        description: Release tag to create (for example v4.0.1-riftvm.11)
         required: true
+        type: string
+      publish_release:
+        description: Publish after verification (manual runs default to a draft for acceptance testing)
+        required: false
+        default: false
+        type: boolean
+      base_release_tag:
+        description: Optional verified release to rebake when only RiftVM integration changed
+        required: false
+        type: string
+      base_image_sha256:
+        description: Required complete raw SHA-256 when base_release_tag is set
+        required: false
         type: string
 
 concurrency:
@@ -20,7 +33,7 @@ permissions:
 
 jobs:
   build-and-release:
-    if: github.repository == 'everettjf/omarchy-aarch64-image'
+    if: github.repository == 'riftvm/riftvm-omarchy-aarch64-image'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
@@ -29,6 +42,33 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag=$REQUESTED_TAG
+          else
+            tag=$REF_NAME
+          fi
+          [[ $tag =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Reject an existing release before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
 
       - name: Resolve pinned build inputs
         id: sources
@@ -40,9 +80,36 @@ jobs:
           echo "omarchy_ref=$OMARCHY_AARCH64_REF" >> "$GITHUB_OUTPUT"
           echo "packages_url=$OMARCHY_PKGS_AARCH64_URL" >> "$GITHUB_OUTPUT"
           echo "packages_ref=$OMARCHY_PKGS_AARCH64_REF" >> "$GITHUB_OUTPUT"
-          echo "ezvm_agent_url=$EZVM_GUEST_AGENT_URL" >> "$GITHUB_OUTPUT"
-          echo "ezvm_agent_ref=$EZVM_GUEST_AGENT_REF" >> "$GITHUB_OUTPUT"
+          echo "riftvm_agent_url=$RIFTVM_GUEST_AGENT_URL" >> "$GITHUB_OUTPUT"
+          echo "riftvm_agent_ref=$RIFTVM_GUEST_AGENT_REF" >> "$GITHUB_OUTPUT"
+          wl_clipboard_rs_repository=${WL_CLIPBOARD_RS_URL#https://github.com/}
+          wl_clipboard_rs_repository=${wl_clipboard_rs_repository%.git}
+          echo "wl_clipboard_rs_repository=$wl_clipboard_rs_repository" >> "$GITHUB_OUTPUT"
+          echo "wl_clipboard_rs_ref=$WL_CLIPBOARD_RS_REF" >> "$GITHUB_OUTPUT"
           echo "cache_week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve optional integration-only base
+        id: base
+        env:
+          BASE_RELEASE_TAG: ${{ inputs.base_release_tag }}
+          BASE_IMAGE_SHA256: ${{ inputs.base_image_sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_RELEASE_TAG" && -z "$BASE_IMAGE_SHA256" ]]; then
+            echo 'use_rebake=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ $BASE_RELEASE_TAG =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            echo 'A valid base_release_tag is required when rebaking.' >&2
+            exit 1
+          }
+          [[ $BASE_IMAGE_SHA256 =~ ^[0-9a-f]{64}$ ]] || {
+            echo 'A complete lowercase base_image_sha256 is required when rebaking.' >&2
+            exit 1
+          }
+          echo 'use_rebake=true' >> "$GITHUB_OUTPUT"
+          echo "tag=$BASE_RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "sha256=$BASE_IMAGE_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned Omarchy source
         uses: actions/checkout@v7
@@ -60,28 +127,49 @@ jobs:
           path: build/dependencies/omarchy-pkgs-aarch64
           persist-credentials: false
 
-      - name: Checkout pinned EZVM guest-agent source
+      - name: Checkout pinned RiftVM guest-agent source
         uses: actions/checkout@v7
         with:
-          repository: everettjf/ezvm
-          ref: ${{ steps.sources.outputs.ezvm_agent_ref }}
-          path: build/dependencies/ezvm
+          repository: riftvm/riftvm
+          ref: ${{ steps.sources.outputs.riftvm_agent_ref }}
+          path: build/dependencies/riftvm
           persist-credentials: false
 
-      - name: Build pinned EZVM guest agent
+      - name: Checkout pinned Wayland clipboard frontend
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.sources.outputs.wl_clipboard_rs_repository }}
+          ref: ${{ steps.sources.outputs.wl_clipboard_rs_ref }}
+          path: build/dependencies/wl-clipboard-rs
+          persist-credentials: false
+
+      - name: Build pinned RiftVM guest agent
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/dependencies/ezvm-agent
+          mkdir -p build/dependencies/rift-agent
           (
-            cd build/dependencies/ezvm/GuestAgent/linux
+            cd build/dependencies/riftvm/GuestAgent/linux
             go test ./...
             GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
-              -trimpath -ldflags '-s -w -X main.version=image' \
-              -o ../../../ezvm-agent/ezvm-agent .
+              -trimpath -ldflags "-s -w -X main.version=${{ steps.sources.outputs.riftvm_agent_ref }}" \
+              -o ../../../rift-agent/rift-agent .
           )
-          file build/dependencies/ezvm-agent/ezvm-agent |
+          file build/dependencies/rift-agent/rift-agent |
             grep -q 'ELF 64-bit.*ARM aarch64.*statically linked'
+
+      - name: Build pinned Wayland clipboard frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path build/dependencies/wl-clipboard-rs/Cargo.toml \
+            --package wl-clipboard-rs-tools --bin wl-copy
+          install -Dm755 \
+            build/dependencies/wl-clipboard-rs/target/release/wl-copy \
+            build/dependencies/rift-agent/wl-copy
+          file build/dependencies/rift-agent/wl-copy |
+            grep -q 'ELF 64-bit.*ARM aarch64'
 
       - name: Restore verified rolling inputs
         id: input-cache
@@ -129,22 +217,96 @@ jobs:
           OMARCHY_TEST_SOURCE: build/dependencies/omarchy-aarch64
         run: ./tests/run
 
+      - name: Reconstruct and verify pinned base release
+        if: steps.base.outputs.use_rebake == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE_TAG: ${{ steps.base.outputs.tag }}
+          BASE_IMAGE_SHA256: ${{ steps.base.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/base-release
+          gh release download "$BASE_RELEASE_TAG" --dir build/base-release
+          ./bin/reconstruct-riftvm-release \
+            --assets build/base-release \
+            --output build/base.raw \
+            --tag "$BASE_RELEASE_TAG" \
+            --sha256 "$BASE_IMAGE_SHA256"
+
+      - name: Prove integration-only change scope
+        if: steps.base.outputs.use_rebake == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RELEASE_TAG: ${{ steps.base.outputs.tag }}
+          OMARCHY_REF: ${{ steps.sources.outputs.omarchy_ref }}
+          WL_COPY_REF: ${{ steps.sources.outputs.wl_clipboard_rs_ref }}
+        run: |
+          set -euo pipefail
+          target=$(gh release view "$BASE_RELEASE_TAG" --json targetCommitish --jq .targetCommitish)
+          base_commit=$(git rev-parse "$target^{commit}")
+          git merge-base --is-ancestor "$base_commit" HEAD || {
+            echo 'The base Release does not belong to the current source history.' >&2
+            exit 1
+          }
+          while IFS= read -r path; do
+            case "$path" in
+              sources.env | bin/build-image | bin/reconstruct-riftvm-release | \
+                bin/rebake-riftvm-integration | bin/rebake-riftvm-integration-container | \
+                .github/workflows/release-image.yml | README.md | RELEASE_NOTES.md | \
+                profiles/aarch64-virt/overlay/etc/systemd/user/rift-session-agent.service | \
+                docs/* | tests/*) ;;
+              *)
+                echo "Integration-only rebake rejected Guest-affecting change: $path" >&2
+                exit 1
+                ;;
+            esac
+          done < <(git diff --name-only "$base_commit" HEAD)
+          git show "$base_commit:sources.env" | sed '/^RIFTVM_GUEST_AGENT_REF=/d' >build/base-sources.env
+          sed '/^RIFTVM_GUEST_AGENT_REF=/d' sources.env >build/current-sources.env
+          cmp build/base-sources.env build/current-sources.env || {
+            echo 'A pinned input other than RIFTVM_GUEST_AGENT_REF changed.' >&2
+            exit 1
+          }
+          provenance=build/base-release/image-provenance.txt
+          grep -qxF "omarchy_source_ref=$OMARCHY_REF" "$provenance"
+          grep -qxF "riftvm_wl_copy_source_ref=$WL_COPY_REF" "$provenance"
+          rm -f -- build/base-sources.env build/current-sources.env
+
       - name: Build and verify the sparse raw image
         env:
           OMARCHY_IMAGE_LOW_DISK: '1'
+          USE_REBAKE: ${{ steps.base.outputs.use_rebake }}
+          BASE_IMAGE_SHA256: ${{ steps.base.outputs.sha256 }}
         run: |
           set -euo pipefail
-          ./bin/build-image-container \
-            --omarchy-source build/dependencies/omarchy-aarch64 \
-            --ezvm-guest-agent build/dependencies/ezvm-agent/ezvm-agent \
-            --force
-          (cd build && sha256sum --check omarchy-aarch64-ezvm.raw.sha256)
+          if [[ "$USE_REBAKE" == true ]]; then
+            ./bin/rebake-riftvm-integration-container \
+              --base-image build/base.raw \
+              --base-sha256 "$BASE_IMAGE_SHA256" \
+              --output build/omarchy-aarch64-riftvm.raw \
+              --riftvm-guest-agent build/dependencies/rift-agent/rift-agent \
+              --rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service \
+              --agent-source-url '${{ steps.sources.outputs.riftvm_agent_url }}' \
+              --agent-source-ref '${{ steps.sources.outputs.riftvm_agent_ref }}' \
+              --expected-omarchy-ref '${{ steps.sources.outputs.omarchy_ref }}' \
+              --expected-wl-copy-ref '${{ steps.sources.outputs.wl_clipboard_rs_ref }}' \
+              --force
+            rm -f -- build/base.raw
+            find build/base-release -depth -delete
+          else
+            ./bin/build-image-container \
+              --omarchy-source build/dependencies/omarchy-aarch64 \
+              --riftvm-guest-agent build/dependencies/rift-agent/rift-agent \
+              --riftvm-wl-copy build/dependencies/rift-agent/wl-copy \
+              --force
+          fi
+          (cd build && sha256sum --check omarchy-aarch64-riftvm.raw.sha256)
           df -h /
 
       # Save before packaging/upload so a later Release API failure does not
       # discard the already verified rootfs and Node.js inputs.
       - name: Save verified rolling inputs
-        if: steps.input-cache.outputs.cache-hit != 'true'
+        if: steps.base.outputs.use_rebake != 'true' && steps.input-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: |
@@ -156,26 +318,10 @@ jobs:
             build/cache/node-v*-linux-arm64.tar.gz
           key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}-${{ steps.sources.outputs.cache_week }}
 
-      - name: Resolve release tag
-        id: release
-        env:
-          REQUESTED_TAG: ${{ inputs.release_tag }}
-          REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
+      - name: Package split RiftVM release assets
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            tag=$REQUESTED_TAG
-          else
-            tag=$REF_NAME
-          fi
-          [[ $tag =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Package split EZVM release assets
-        run: |
-          set -euo pipefail
-          ./bin/package-ezvm-release \
+          ./bin/package-riftvm-release \
             --tag '${{ steps.release.outputs.tag }}' \
             --output build/release-assets
           find build/release-assets -maxdepth 1 -type f -size +2047M -print -quit |
@@ -201,7 +347,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             --draft \
             --target "$GITHUB_SHA" \
-            --title "Omarchy AArch64 VM for EZVM $RELEASE_TAG" \
+            --title "Omarchy AArch64 VM for RiftVM $RELEASE_TAG" \
             --notes-file RELEASE_NOTES.md \
             "${assets[@]}"
 
@@ -219,7 +365,14 @@ jobs:
           done < <(cd "$release_dir" && sha256sum *)
 
       - name: Publish verified Release
+        if: github.event_name == 'push' || inputs.publish_release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" =~ (^|[.-])(alpha|beta|rc)([.-]|$) ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi

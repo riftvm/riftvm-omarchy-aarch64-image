@@ -7,11 +7,11 @@
 
 set -u
 
-readonly INSTANCE_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-ezvm-display-watch.instance.lock"
-readonly DRM_ROOT="${OMARCHY_EZVM_DRM_ROOT:-/sys/class/drm}"
-readonly HYPRCTL="${OMARCHY_EZVM_HYPRCTL:-hyprctl}"
-readonly POLL_INTERVAL="${OMARCHY_EZVM_POLL_INTERVAL:-1}"
-readonly LOG_FILE="${OMARCHY_EZVM_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-ezvm-display-watch.log}"
+readonly INSTANCE_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-riftvm-display-watch.instance.lock"
+readonly DRM_ROOT="${OMARCHY_RIFTVM_DRM_ROOT:-/sys/class/drm}"
+readonly HYPRCTL="${OMARCHY_RIFTVM_HYPRCTL:-hyprctl}"
+readonly POLL_INTERVAL="${OMARCHY_RIFTVM_POLL_INTERVAL:-1}"
+readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-riftvm-display-watch.log}"
 
 log_debug() {
   # Keep the volatile per-session file for quick local inspection, but also
@@ -25,7 +25,7 @@ log_debug() {
 
 discover_hyprland_instance() {
   local socket instance_dir
-  [[ -n ${OMARCHY_EZVM_HYPRCTL:-} ]] && return 0
+  [[ -n ${OMARCHY_RIFTVM_HYPRCTL:-} ]] && return 0
   [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && return 0
   for socket in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/hypr/*/.socket.sock; do
     [[ -S $socket ]] || continue

@@ -1,7 +1,7 @@
-# EZVM image release and validation
+# RiftVM image release and validation
 
 This document records the evidence required before an Omarchy image becomes
-the public EZVM `latest` release. A successful build alone is not sufficient.
+the public RiftVM `latest` release. A successful build alone is not sufficient.
 
 ## Canonical artifacts
 
@@ -11,12 +11,21 @@ and the size and SHA-256 of every numbered part and the thumbnail.
 
 Keep the local raw image until a release has passed the complete download and
 installation audit. If a local raw image is removed afterwards, reconstruct it
-from the numbered assets using `install-Omarchy-ezvm.command`; do not substitute
+from the numbered assets using `install-Omarchy-riftvm.command`; do not substitute
 an older raw image that happens to have the same product version.
+
+An integration-only Guest Agent rebake is allowed only when the base Release
+tag and its complete raw SHA-256 are supplied together. The reconstruction and
+rebake tools must verify all split assets, preserve the accepted package
+inventories, recreate the read-only factory snapshot from the updated bootable
+root, and bind both the base raw digest and new Agent commit into provenance.
+It does not waive any clean-workspace acceptance requirement and must not be
+used for other Guest or operating-system changes.
 
 The packager also copies available build evidence into the release layout:
 
-- `image-provenance.txt` records source URLs, commits, signatures, and hashes;
+- `image-provenance.txt` records source URLs, commits, signatures, hashes, and
+  the exact RiftVM Guest Agent source revision and binary digest;
 - `*.raw.sha256` identifies the exact raw disk;
 - `*.all-packages.txt` and `*.packages.tsv` inventory the installed system; and
 - `*.explicit-packages.txt` and `*.orphans.txt` record package state.
@@ -30,7 +39,7 @@ The packager also copies available build evidence into the release layout:
 3. Package the exact tested raw image:
 
    ```bash
-   ./bin/package-ezvm-release \
+   ./bin/package-riftvm-release \
      --tag <release-tag> \
      --image build/<tested-image>.raw \
      --output build/release-assets
@@ -38,18 +47,18 @@ The packager also copies available build evidence into the release layout:
 
 4. Run `sha256sum --check SHA256SUMS` in the release directory.
 5. Decode the numbered parts into a new sparse raw file and verify that its
-   SHA-256 equals `.disk.sha256` in `ezvm-release-manifest.json`.
+   SHA-256 equals `.disk.sha256` in `riftvm-release-manifest.json`.
 6. Upload a draft GitHub Release. Compare every GitHub-reported asset digest
    and size with the local files before publishing it as `latest`.
 7. Download every asset from the public GitHub Release into an empty directory.
    Check `SHA256SUMS`, reconstruct the disk again, and verify its SHA-256.
-8. Run the published installer and inspect the imported EZVM configuration and
+8. Run the published installer and inspect the imported RiftVM configuration and
    disk. Boot this installed copy before declaring the release complete.
 
-## v4.0.1-ezvm.13 acceptance record
+## v4.0.1-riftvm.13 acceptance record
 
-`v4.0.1-ezvm.13` is the first release produced from the final end-to-end QA
-disk after the EZVM input and display work. Its raw disk is 64 GiB logical,
+`v4.0.1-riftvm.13` is the first release produced from the final end-to-end QA
+disk after the RiftVM input and display work. Its raw disk is 64 GiB logical,
 sparse on APFS, and has SHA-256:
 
 ```text
@@ -66,4 +75,4 @@ storage, and NAT networking.
 
 Release URL:
 
-<https://github.com/everettjf/omarchy-aarch64-image/releases/tag/v4.0.1-ezvm.13>
+<https://github.com/riftvm/riftvm-omarchy-aarch64-image/releases/tag/v4.0.1-riftvm.13>
