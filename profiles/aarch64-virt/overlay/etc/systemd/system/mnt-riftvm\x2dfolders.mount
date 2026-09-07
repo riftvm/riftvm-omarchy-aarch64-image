@@ -1,0 +1,9 @@
+[Unit]
+Description=Authorized RiftVM host folders
+
+[Mount]
+What=riftvm_folders
+Where=/mnt/riftvm-folders
+Type=virtiofs
+Options=rw,nosuid,nodev
+TimeoutSec=5

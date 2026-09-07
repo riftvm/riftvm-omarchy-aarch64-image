@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+# Never replace an existing Guest file or directory.
+if [[ ! -e "$HOME/Mac" && ! -L "$HOME/Mac" ]]; then
+  ln -s /mnt/riftvm-folders "$HOME/Mac"
+fi

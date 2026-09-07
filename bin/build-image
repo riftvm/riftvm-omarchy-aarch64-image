@@ -931,6 +931,7 @@ EOF
     "$MOUNT_DIR/usr/local/libexec/omarchy-hyprland-monitor-watch-upstream"
   cp -a --no-preserve=ownership "$OVERLAY_DIR/." "$MOUNT_DIR/"
   install -d -m755 "$MOUNT_DIR/mnt/riftvm-shared"
+  install -d -m755 "$MOUNT_DIR/mnt/riftvm-folders"
   install -m755 "$RIFTVM_GUEST_AGENT_BINARY" "$MOUNT_DIR/usr/local/sbin/rift-agent"
   # /usr/local/bin precedes the packaged /usr/bin implementation for both the
   # Session Agent and interactive Omarchy shells. Keep wl-paste packaged until
@@ -947,6 +948,8 @@ EOF
   target_chroot systemctl enable omarchy-aarch64-grow-root.service
   target_chroot systemctl enable run-riftvm\\x2dagent\\x2dconfig.mount rift-agent.service
   target_chroot systemctl enable 'mnt-riftvm\x2dshared.mount'
+  target_chroot systemctl enable 'mnt-riftvm\x2dfolders.automount'
+  target_chroot systemctl --global enable riftvm-host-folders.service
   # This display path is independent of SPICE.  Enable dedicated user units
   # globally so an RiftVM virtio-gpu session does not inherit SPICE port or
   # WAYLAND_DISPLAY conditions from optional clipboard integration services.

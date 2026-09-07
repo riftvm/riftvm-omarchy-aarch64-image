@@ -1,0 +1,8 @@
+[Unit]
+Description=On-demand authorized RiftVM host folders
+
+[Automount]
+Where=/mnt/riftvm-folders
+
+[Install]
+WantedBy=multi-user.target

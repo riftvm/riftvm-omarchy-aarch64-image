@@ -1062,3 +1062,11 @@ fi
 pass "image orchestration does not depend on a nested source repository"
 
 echo "VERDICT: PASS"
+
+folder_units="$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system"
+grep -Fxq 'What=riftvm_folders' "$folder_units/mnt-riftvm\x2dfolders.mount" || fail "host folder tag mismatch"
+grep -Fxq 'Options=rw,nosuid,nodev' "$folder_units/mnt-riftvm\x2dfolders.mount" || fail "host folders lack mount hardening"
+grep -Fxq 'Where=/mnt/riftvm-folders' "$folder_units/mnt-riftvm\x2dfolders.automount" || fail "host folders are not mounted on demand"
+grep -Fq "systemctl enable 'mnt-riftvm\\x2dfolders.automount'" "$ROOT/bin/build-image" || fail "host folder automount is not enabled"
+grep -Fq 'systemctl --global enable riftvm-host-folders.service' "$ROOT/bin/build-image" || fail "desktop Mac shortcut is not enabled"
+pass "authorized host folders are mounted separately from Agent transport"

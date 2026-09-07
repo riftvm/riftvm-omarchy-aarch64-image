@@ -1,0 +1,12 @@
+[Unit]
+Description=Expose authorized Mac folders in the desktop session
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/riftvm-host-folders
+RemainAfterExit=yes
+NoNewPrivileges=true
+
+[Install]
+WantedBy=graphical-session.target
