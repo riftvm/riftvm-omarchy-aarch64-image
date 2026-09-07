@@ -968,7 +968,7 @@ grep -Fq 'install -m755 "$RIFTVM_WL_COPY_BINARY" "$MOUNT_DIR/usr/local/bin/wl-co
   "$ROOT/bin/build-image" ||
   fail "image does not install the verified wl-copy frontend ahead of /usr/bin"
 grep -Fq 'What=rift-agent' \
-  "$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/run-riftvm\\x2dagent\\x2dconfig.mount" ||
+  "$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/run-rift\\x2dagent\\x2dconfig.mount" ||
   fail "image does not mount the host-provided RiftVM enrollment share"
 grep -Fq 'Before=omarchy-provision-owner.service' \
   "$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/rift-agent.service" ||

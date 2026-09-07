@@ -17,11 +17,11 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
       - name: Checkout image source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Resolve pinned Omarchy source
         id: sources
@@ -32,7 +32,7 @@ jobs:
           echo "omarchy_ref=$OMARCHY_AARCH64_REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned Omarchy source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: riverscn/omarchy-aarch64
           ref: ${{ steps.sources.outputs.omarchy_ref }}
