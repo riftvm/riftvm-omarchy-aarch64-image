@@ -9,6 +9,7 @@ OUTPUT_IMAGE=""
 EXPECTED_TAG=""
 EXPECTED_SHA256=""
 FORCE=0
+LEGACY_EZVM32=0
 STAGED=""
 STAGED_METADATA=()
 COMPLETE=0
@@ -55,6 +56,7 @@ while (($#)); do
     --output) (($# >= 2)) || fail "--output requires a path"; OUTPUT_IMAGE=$(absolute_path "$2"); shift 2 ;;
     --tag) (($# >= 2)) || fail "--tag requires a value"; EXPECTED_TAG=$2; shift 2 ;;
     --sha256) (($# >= 2)) || fail "--sha256 requires a digest"; EXPECTED_SHA256=$2; shift 2 ;;
+    --legacy-ezvm32) LEGACY_EZVM32=1; shift ;;
     --force) FORCE=1; shift ;;
     *) fail "unknown option: $1" ;;
   esac
@@ -71,16 +73,27 @@ if [[ -e $OUTPUT_IMAGE || -L $OUTPUT_IMAGE ]]; then
 fi
 
 manifest="$ASSET_DIR/riftvm-release-manifest.json"
+manifest_kind=com.riftvm.preinstalled-image
+compression=riftvm-sparse-stream+gzip
+decode_args=()
+if ((LEGACY_EZVM32)); then
+  # One explicitly pinned migration source, never a general legacy import path.
+  [[ $EXPECTED_TAG == v4.0.0-alpha-ezvm.32 && $EXPECTED_SHA256 == 1ad443730ea340eaa7003b01c26ea142434b0f88a4280bd34fb8909e32d9b0a9 ]] || fail "legacy migration requires the reviewed EZVM .32 base digest"
+  manifest="$ASSET_DIR/ezvm-release-manifest.json"
+  manifest_kind=io.github.everettjf.ezvm.preinstalled-image
+  compression=ezvm-sparse-stream+gzip
+  decode_args=(--legacy-ezvm)
+fi
 [[ -f $manifest && ! -L $manifest ]] || fail "release manifest is missing or unsafe"
-jq --exit-status --arg tag "$EXPECTED_TAG" --arg sha "$EXPECTED_SHA256" '
+jq --exit-status --arg tag "$EXPECTED_TAG" --arg sha "$EXPECTED_SHA256" --arg kind "$manifest_kind" --arg compression "$compression" '
   .schemaVersion == 1 and
-  .kind == "com.riftvm.preinstalled-image" and
+  .kind == $kind and
   .architecture == "arm64" and
   .release.tag == $tag and
   .disk.format == "raw" and
   .disk.sha256 == $sha and
   (.disk.virtualSize | type == "number" and . > 0) and
-  .archive.compression == "riftvm-sparse-stream+gzip" and
+  .archive.compression == $compression and
   (.archive.sha256 | test("^[0-9a-f]{64}$")) and
   (.archive.parts | type == "array" and length > 0) and
   ([.archive.parts[].name] | length == (unique | length)) and
@@ -104,7 +117,7 @@ archive_sha=$(cat -- "${parts[@]}" | sha256sum | awk '{print $1}')
 
 STAGED="$OUTPUT_IMAGE.part"
 [[ ! -e $STAGED && ! -L $STAGED ]] || fail "staged output already exists: $STAGED"
-cat -- "${parts[@]}" | gzip -dc | perl "$PROJECT_ROOT/bin/decode-riftvm-sparse" "$STAGED"
+cat -- "${parts[@]}" | gzip -dc | perl "$PROJECT_ROOT/bin/decode-riftvm-sparse" "$STAGED" "${decode_args[@]}"
 [[ $(file_size "$STAGED") == "$(jq -r '.disk.virtualSize' "$manifest")" ]] || fail "reconstructed image size mismatch"
 [[ $(sha256sum "$STAGED" | awk '{print $1}') == "$EXPECTED_SHA256" ]] || fail "reconstructed image checksum mismatch"
 

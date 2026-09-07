@@ -1070,3 +1070,14 @@ grep -Fxq 'Where=/mnt/riftvm-folders' "$folder_units/mnt-riftvm\x2dfolders.autom
 grep -Fq "systemctl enable 'mnt-riftvm\\x2dfolders.automount'" "$ROOT/bin/build-image" || fail "host folder automount is not enabled"
 grep -Fq 'systemctl --global enable riftvm-host-folders.service' "$ROOT/bin/build-image" || fail "desktop Mac shortcut is not enabled"
 pass "authorized host folders are mounted separately from Agent transport"
+
+# The old stream header is accepted only through an explicit decoder switch;
+# the reconstruct entry point additionally pins the exact reviewed base digest.
+legacy_fixture=$(mktemp -d)
+printf 'EZVM-SPARSE-1\n8\n0 3\nabcEND\n' | perl "$ROOT/bin/decode-riftvm-sparse" "$legacy_fixture/legacy.raw" --legacy-ezvm
+[[ $(stat -c %s "$legacy_fixture/legacy.raw") == 8 ]] || fail "legacy decoder lost logical size"
+if printf 'EZVM-SPARSE-1\n8\nEND\n' | perl "$ROOT/bin/decode-riftvm-sparse" "$legacy_fixture/rejected.raw" 2>/dev/null; then
+  fail "normal decoder silently accepts legacy streams"
+fi
+rm -rf -- "$legacy_fixture"
+pass "legacy factory decoding requires explicit migration mode"

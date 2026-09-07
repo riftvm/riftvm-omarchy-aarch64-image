@@ -946,7 +946,7 @@ EOF
   read_list "$CONFIG_DIR/omarchy-packages.aarch64" \
     >"$MOUNT_DIR/etc/omarchy-aarch64/managed-packages"
   target_chroot systemctl enable omarchy-aarch64-grow-root.service
-  target_chroot systemctl enable run-riftvm\\x2dagent\\x2dconfig.mount rift-agent.service
+  target_chroot systemctl enable run-rift\\x2dagent\\x2dconfig.mount rift-agent.service
   target_chroot systemctl enable 'mnt-riftvm\x2dshared.mount'
   target_chroot systemctl enable 'mnt-riftvm\x2dfolders.automount'
   target_chroot systemctl --global enable riftvm-host-folders.service
@@ -1239,7 +1239,7 @@ validate_target() {
     etc/systemd/system/multi-user.target.wants/omarchy-provision-owner.service
     etc/systemd/system/multi-user.target.wants/rift-agent.service
     'etc/systemd/system/multi-user.target.wants/mnt-riftvm\x2dshared.mount'
-    etc/systemd/system/multi-user.target.wants/run-riftvm\\x2dagent\\x2dconfig.mount
+    etc/systemd/system/multi-user.target.wants/run-rift\\x2dagent\\x2dconfig.mount
     'etc/systemd/system/mnt-riftvm\x2dshared.mount'
     mnt/riftvm-shared
     etc/systemd/user/rift-session-agent.service
