@@ -1,4 +1,4 @@
-name: Publish AArch64 RiftVM image
+name: Build AArch64 RiftVM image candidate
 
 on:
   push:
@@ -7,14 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to create (for example v4.0.1-riftvm.11)
+        description: Candidate tag to create (for example v0.1.0-rc.1)
         required: true
         type: string
-      publish_release:
-        description: Publish after verification (manual runs default to a draft for acceptance testing)
-        required: false
-        default: false
-        type: boolean
       migrate_ezvm32:
         description: Migrate the digest-pinned reviewed EZVM .32 factory into RiftVM
         required: false
@@ -388,15 +383,7 @@ jobs:
             }
           done < <(cd "$release_dir" && sha256sum *)
 
-      - name: Publish verified Release
-        if: github.event_name == 'push' || inputs.publish_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+      - name: Report factory signing handoff
         run: |
-          set -euo pipefail
-          if [[ "$RELEASE_TAG" =~ (^|[.-])(alpha|beta|rc)([.-]|$) ]]; then
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease
-          else
-            gh release edit "$RELEASE_TAG" --draft=false --latest
-          fi
+          echo "Raw image draft verified. The release remains a draft."
+          echo "Next: verify ASIF against the raw image, sign and upload the factory manifest/parts on macOS, and complete native acceptance before publication."

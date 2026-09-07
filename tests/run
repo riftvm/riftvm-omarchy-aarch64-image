@@ -554,22 +554,15 @@ fi
 grep -Fq 'uses: actions/cache/save@v6' "$ROOT/.github/workflows/release-image.yml" ||
   fail "verified rolling inputs are only cached after the entire Release succeeds"
 grep -Fq -- '--notes-file RELEASE_NOTES.md' "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq 'releases/latest/download/install-Omarchy-riftvm.command' "$ROOT/RELEASE_NOTES.md" &&
-  grep -Fq 'releases/latest/download/install-Omarchy-riftvm.command' "$ROOT/README.md" ||
-  fail "GitHub Releases do not expose the one-command latest installer"
-pass "native GitHub image publishing emits only the verified RiftVM image path"
-grep -Fq "if: github.event_name == 'push' || inputs.publish_release" \
-  "$ROOT/.github/workflows/release-image.yml" ||
-  fail "manual image validation can accidentally publish a draft as latest"
-pass "manual image validation remains a draft unless publication is explicit"
-grep -Fq '(^|[.-])(alpha|beta|rc)([.-]|$)' \
-  "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq -- '--draft=false --prerelease' \
-    "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq -- '--draft=false --latest' \
-    "$ROOT/.github/workflows/release-image.yml" ||
-  fail "image publication does not separate prerelease and stable latest channels"
-pass "Alpha, Beta, and RC images publish as prereleases without replacing latest stable"
+  grep -Fq 'riftvm-omarchy-factory-manifest.json' "$ROOT/RELEASE_NOTES.md" &&
+  grep -Fq 'macOS 27' "$ROOT/README.md" ||
+  fail "release documentation does not describe the unified signed factory contract"
+if grep -Eq -- '--draft(=| +)false|--latest|inputs.publish_release' "$ROOT/.github/workflows/release-image.yml"; then
+  fail "the raw-image workflow must not publish before macOS factory signing and native acceptance"
+fi
+grep -Fq -- '--draft' "$ROOT/.github/workflows/release-image.yml" ||
+  fail "raw image creation must remain a draft"
+pass "raw image candidates remain draft for macOS factory signing and native acceptance"
 grep -Fq 'pacman failed after 8 attempts' "$ROOT/bin/build-image" ||
   fail "target package installation does not tolerate transient mirror failures"
 (

@@ -61,59 +61,41 @@ The distributed image is intentionally unencrypted. A reusable image cannot
 safely contain a shared disk-encryption key; per-machine encryption requires a
 future installer that creates a unique container during import.
 
-## One-command installation
+## Installation status
 
-Requirements:
+RiftVM 0.1.0 is in development for Apple silicon and macOS 27. No public App
+release or Homebrew cask is available yet. See [RiftVM](https://riftvm.github.io/)
+for release availability.
 
-- Apple silicon Mac;
-- macOS 26 or newer;
-- Homebrew; and
-- at least 15 GiB available on the destination volume.
+The unified App creates an Omarchy workspace from an exact, signed factory
+manifest. It verifies the Ed25519 signature and every image part, keeps a shared
+read-only factory cache, and gives each workspace its own writable disk,
+machine identity and owner credentials. Image updates apply to new workspaces;
+they do not replace existing guest disks.
 
-The recommended command installs or updates RiftVM, verifies the published
-Omarchy installer, downloads and verifies every image part, and imports a new
-machine:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/riftvm/riftvm/main/scripts/install-omarchy.sh)"
-```
-
-If RiftVM 0.1.0 or newer is already installed, the image-only installer is:
-
-```bash
-/bin/bash -o pipefail -c 'curl -fsSL https://github.com/riftvm/riftvm-omarchy-aarch64-image/releases/latest/download/install-Omarchy-riftvm.command | /bin/bash'
-```
-
-The installer treats `riftvm-release-manifest.json` as its sole metadata source.
-It verifies:
-
-- every numbered part's byte length and SHA-256;
-- the complete compressed stream SHA-256;
-- the decoded raw disk's virtual size and SHA-256;
-- the thumbnail's byte length and SHA-256; and
-- the minimum supported RiftVM version.
-
-The portable sparse stream records only allocated extents and recreates them at
-their exact disk offsets on macOS. The logical disk is 64 GiB while physical
-host usage stays close to the guest's used data. RiftVM creates fresh machine,
-NVRAM, and host configuration identities during import.
+Factory candidates use immutable versioned URLs. Do not use `releases/latest`
+for a candidate: GitHub excludes prereleases from that endpoint.
 
 ## Release assets
 
-Each Release contains only the RiftVM installation path:
+The canonical App factory consists of:
 
-- `install-Omarchy-riftvm.command`;
-- `riftvm-release-manifest.json`;
-- numbered `Omarchy-riftvm.sparse.gz.part-*` files;
-- `Omarchy-thumbnail.png`;
-- `SHA256SUMS`;
-- image provenance; and
-- exact package inventories.
+- `riftvm-omarchy-factory-manifest.json`, signed with the key trusted by RiftVM;
+- numbered `Omarchy-Factory.asif.part-*` files;
+- `RIFTVM_FACTORY_SHA256SUMS`; and
+- image provenance and exact package inventories.
 
-GitHub limits each asset to 2 GiB, so the encoded sparse stream is compressed
-and split into parts of at most 1,900 MiB. The workflow validates local
-checksums, uploads a draft Release, verifies GitHub's digest for every asset,
-and publishes only after all checks succeed.
+The Linux workflow produces the verified raw image as a draft. A macOS signing
+stage converts and verifies ASIF, signs the manifest and uploads the factory
+parts to that same draft. Publishing requires these factory assets and native
+runtime acceptance, in addition to matching uploaded digests.
+
+Drafts may also contain the original sparse-stream export, thumbnail and import
+script for development tooling. That raw import route does not replace the
+unified App's Omarchy creation flow and is not the supported first-install path.
+
+Each part stays below GitHub's 2 GiB asset limit. The guest disk has a 64 GiB
+logical capacity; sparse storage avoids allocating all of it on the host.
 
 ## Build
 
