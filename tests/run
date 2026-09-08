@@ -836,6 +836,9 @@ grep -Fq 'pacman -Syu --needed --noconfirm btrfs-progs util-linux' \
 grep -Fq -- '--owner-provisioning-consumer)' \
   "$ROOT/bin/rebake-riftvm-integration-container" ||
   fail "integration rebake container does not forward the owner provisioning consumer"
+grep -Fq -- '--precloned-output)' "$ROOT/bin/rebake-riftvm-integration-container" &&
+  grep -Fq 'precloned output differs from the verified base image' "$ROOT/bin/rebake-riftvm-integration" ||
+  fail "integration rebake does not safely support host-cloned sparse output"
 grep -Fq -- '--rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "integration rebake does not install the pinned Session Agent unit"
