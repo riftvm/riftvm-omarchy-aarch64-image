@@ -75,14 +75,12 @@ fi
 manifest="$ASSET_DIR/riftvm-release-manifest.json"
 manifest_kind=com.riftvm.preinstalled-image
 compression=riftvm-sparse-stream+gzip
-decode_args=()
 if ((LEGACY_EZVM32)); then
   # One explicitly pinned migration source, never a general legacy import path.
   [[ $EXPECTED_TAG == v4.0.0-alpha-ezvm.32 && $EXPECTED_SHA256 == 1ad443730ea340eaa7003b01c26ea142434b0f88a4280bd34fb8909e32d9b0a9 ]] || fail "legacy migration requires the reviewed EZVM .32 base digest"
   manifest="$ASSET_DIR/ezvm-release-manifest.json"
   manifest_kind=io.github.everettjf.ezvm.preinstalled-image
   compression=ezvm-sparse-stream+gzip
-  decode_args=(--legacy-ezvm)
 fi
 [[ -f $manifest && ! -L $manifest ]] || fail "release manifest is missing or unsafe"
 jq --exit-status --arg tag "$EXPECTED_TAG" --arg sha "$EXPECTED_SHA256" --arg kind "$manifest_kind" --arg compression "$compression" '
@@ -117,7 +115,11 @@ archive_sha=$(cat -- "${parts[@]}" | sha256sum | awk '{print $1}')
 
 STAGED="$OUTPUT_IMAGE.part"
 [[ ! -e $STAGED && ! -L $STAGED ]] || fail "staged output already exists: $STAGED"
-cat -- "${parts[@]}" | gzip -dc | perl "$PROJECT_ROOT/bin/decode-riftvm-sparse" "$STAGED" "${decode_args[@]}"
+if ((LEGACY_EZVM32)); then
+  cat -- "${parts[@]}" | gzip -dc | perl "$PROJECT_ROOT/bin/decode-riftvm-sparse" "$STAGED" --legacy-ezvm
+else
+  cat -- "${parts[@]}" | gzip -dc | perl "$PROJECT_ROOT/bin/decode-riftvm-sparse" "$STAGED"
+fi
 [[ $(file_size "$STAGED") == "$(jq -r '.disk.virtualSize' "$manifest")" ]] || fail "reconstructed image size mismatch"
 [[ $(sha256sum "$STAGED" | awk '{print $1}') == "$EXPECTED_SHA256" ]] || fail "reconstructed image checksum mismatch"
 

@@ -593,7 +593,7 @@ grep -Fq 'pacman failed after 8 attempts' "$ROOT/bin/build-image" ||
   if (retry_target_pacman -Syu --needed --noconfirm example); then
     fail "deterministic dependency failure was accepted"
   fi
-  [[ $(wc -l <"$attempts") == 1 ]] ||
+  [[ $(wc -l <"$attempts" | tr -d '[:space:]') == 1 ]] ||
     fail "deterministic dependency failure ran more than once"
 )
 pass "deterministic package dependency failures stop without mirror retries"
