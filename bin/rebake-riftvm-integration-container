@@ -18,7 +18,7 @@ container_path() {
 args=()
 while (($#)); do
   case $1 in
-    --base-image | --output | --riftvm-guest-agent | --rift-session-agent-unit)
+    --base-image | --output | --riftvm-guest-agent | --rift-session-agent-unit | --owner-provisioning-consumer)
       (($# >= 2)) || fail "$1 requires a path"
       args+=("$1" "$(container_path "$2")")
       shift 2

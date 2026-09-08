@@ -833,6 +833,9 @@ grep -Fq -- '--riftvm-wl-copy build/dependencies/rift-agent/wl-copy' \
 grep -Fq 'pacman -Syu --needed --noconfirm btrfs-progs util-linux' \
   "$ROOT/bin/rebake-riftvm-integration-container" ||
   fail "integration rebake container does not provision its filesystem tools"
+grep -Fq -- '--owner-provisioning-consumer)' \
+  "$ROOT/bin/rebake-riftvm-integration-container" ||
+  fail "integration rebake container does not forward the owner provisioning consumer"
 grep -Fq -- '--rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "integration rebake does not install the pinned Session Agent unit"
