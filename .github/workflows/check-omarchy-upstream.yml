@@ -1,0 +1,40 @@
+name: Check official Omarchy release
+
+on:
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  compare-stable-release:
+    if: github.repository == 'riftvm/riftvm-omarchy-aarch64-image'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout image source
+        uses: actions/checkout@v7
+
+      - name: Compare pinned and official stable versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./sources.env
+          official_tag=$(gh api repos/basecamp/omarchy/releases/latest --jq .tag_name)
+          official_version=${official_tag#v}
+          if [[ "$official_version" == "$OMARCHY_AARCH64_VERSION" ]]; then
+            echo "Factory source already tracks official Omarchy $official_tag."
+            exit 0
+          fi
+          title="Track official Omarchy ${official_tag} in the RiftVM factory image"
+          existing=$(gh issue list --state open --search "$title in:title" --json number --jq length)
+          [[ "$existing" == 0 ]] || exit 0
+          gh issue create --title "$title" --body "Official Omarchy released **${official_tag}**, while the RiftVM AArch64 factory is pinned to **${OMARCHY_AARCH64_VERSION}** at \`${OMARCHY_AARCH64_REF}\`.
+
+          Port and review the AArch64 release, update immutable source/package refs, build a draft Factory image, and pass clean-workspace, input, display, sharing, update, and rollback acceptance before promotion.
+
+          Official release: https://github.com/basecamp/omarchy/releases/tag/${official_tag}"

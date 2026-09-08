@@ -563,6 +563,16 @@ fi
 grep -Fq -- '--draft' "$ROOT/.github/workflows/release-image.yml" ||
   fail "raw image creation must remain a draft"
 pass "raw image candidates remain draft for macOS factory signing and native acceptance"
+grep -Fq "cron: '17 8 * * 1'" "$ROOT/.github/workflows/release-image.yml" &&
+  grep -Fq 'riftvm.weekly.$(date -u +%Y%m%d)' "$ROOT/.github/workflows/release-image.yml" ||
+  fail "weekly draft Factory rebuilds are not scheduled deterministically"
+grep -Fq "cron: '41 7 * * *'" "$ROOT/.github/workflows/check-omarchy-upstream.yml" &&
+  grep -Fq 'repos/basecamp/omarchy/releases/latest' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
+  fail "official Omarchy stable releases are not checked daily"
+if grep -R -Fq 'everettjf/omarchy-aarch64-image' "$ROOT/.github" "$ROOT/bin"; then
+  fail "active image automation still accesses the personal legacy repository"
+fi
+pass "official-version tracking and weekly draft rebuilds stay inside the RiftVM organization"
 grep -Fq 'pacman failed after 8 attempts' "$ROOT/bin/build-image" ||
   fail "target package installation does not tolerate transient mirror failures"
 (

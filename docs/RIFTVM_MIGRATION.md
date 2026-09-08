@@ -1,6 +1,6 @@
 # RiftVM image migration
 
-Source baseline: `everettjf/omarchy-aarch64-image` integration commit
+Source baseline: the reviewed pre-RiftVM integration commit
 `6aa7490b3cafa417dbb269e524d886fc4bfca29d`. This includes the first-owner
 consumer, stdin-safe clipboard frontend, Session Agent, and verified draft
 release pipeline. The older local integration checkout did not include all
