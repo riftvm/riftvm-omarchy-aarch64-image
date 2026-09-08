@@ -257,6 +257,7 @@ jobs:
                 bin/rebake-riftvm-integration | bin/rebake-riftvm-integration-container | \
                 .github/workflows/* | README.md | RELEASE_NOTES.md | \
                 profiles/aarch64-virt/overlay/etc/systemd/user/rift-session-agent.service | \
+                profiles/aarch64-virt/overlay/usr/local/libexec/riftvm-owner-provisioning | \
                 docs/* | tests/*) ;;
               *)
                 echo "Integration-only rebake rejected Guest-affecting change: $path" >&2
@@ -289,6 +290,7 @@ jobs:
               --output build/omarchy-aarch64-riftvm.raw \
               --riftvm-guest-agent build/dependencies/rift-agent/rift-agent \
               --rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service \
+              --owner-provisioning-consumer profiles/aarch64-virt/overlay/usr/local/libexec/riftvm-owner-provisioning \
               --agent-source-url '${{ steps.sources.outputs.riftvm_agent_url }}' \
               --agent-source-ref '${{ steps.sources.outputs.riftvm_agent_ref }}' \
               --expected-omarchy-ref '${{ steps.sources.outputs.omarchy_ref }}' \

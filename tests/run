@@ -836,6 +836,9 @@ grep -Fq 'pacman -Syu --needed --noconfirm btrfs-progs util-linux' \
 grep -Fq -- '--rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "integration rebake does not install the pinned Session Agent unit"
+grep -Fq -- '--owner-provisioning-consumer profiles/aarch64-virt/overlay/usr/local/libexec/riftvm-owner-provisioning' \
+  "$ROOT/.github/workflows/release-image.yml" ||
+  fail "integration rebake does not install the RiftVM owner provisioning consumer"
 [[ -x $ROOT/bin/reconstruct-riftvm-release ]] ||
   fail "pinned base-release reconstruction tool is not executable"
 grep -Fq '[[ $actual == "$BASE_SHA256" ]]' "$ROOT/bin/rebake-riftvm-integration" &&
@@ -858,6 +861,7 @@ fi
   OUTPUT_IMAGE="$fixture/output.raw"
   AGENT_BINARY="$fixture/agent"
   SESSION_AGENT_UNIT="$fixture/rift-session-agent.service"
+  OWNER_PROVISIONING_CONSUMER="$fixture/riftvm-owner-provisioning"
   AGENT_SOURCE_URL=https://github.com/riftvm/riftvm.git
   AGENT_SOURCE_REF=0123456789abcdef0123456789abcdef01234567
   EXPECTED_OMARCHY_REF=1111111111111111111111111111111111111111
@@ -866,6 +870,7 @@ fi
   mkdir -p "$root/usr/share/omarchy-aarch64"
   printf 'new agent\n' >"$AGENT_BINARY"
   printf '[Service]\nReadWritePaths=/run/rift-agent/sessions /mnt/riftvm-shared\n' >"$SESSION_AGENT_UNIT"
+  printf '#!/bin/bash\n' >"$OWNER_PROVISIONING_CONSUMER"
   cat >"$root/usr/share/omarchy-aarch64/image-build.txt" <<'EOF'
 built_at=2026-09-04T00:00:00Z
 rootfs_sha256=preserved
@@ -885,6 +890,7 @@ EOF
   [[ $(grep -c '^riftvm_guest_agent_source_ref=' "$provenance") == 1 ]]
   grep -qxF "riftvm_guest_agent_source_ref=$AGENT_SOURCE_REF" "$provenance"
   grep -qxF "riftvm_session_agent_unit_sha256=$(sha256sum "$SESSION_AGENT_UNIT" | awk '{print $1}')" "$provenance"
+  grep -qxF "riftvm_owner_provisioning_consumer_sha256=$(sha256sum "$OWNER_PROVISIONING_CONSUMER" | awk '{print $1}')" "$provenance"
   grep -qxF "riftvm_integration_base_raw_sha256=$BASE_SHA256" "$provenance"
   cmp -s "$provenance" "$fixture/image-provenance.txt"
 )

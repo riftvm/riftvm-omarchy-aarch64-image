@@ -7,6 +7,7 @@ BASE_SHA256=""
 OUTPUT_IMAGE=""
 AGENT_BINARY=""
 SESSION_AGENT_UNIT=""
+OWNER_PROVISIONING_CONSUMER=""
 AGENT_SOURCE_URL=""
 AGENT_SOURCE_REF=""
 EXPECTED_OMARCHY_REF=""
@@ -33,6 +34,7 @@ Required options:
   --output PATH           New sparse raw image (must differ from the base)
   --riftvm-guest-agent PATH Statically linked Linux ARM64 Guest Agent
   --rift-session-agent-unit PATH  Matching systemd user unit from the pinned RiftVM source
+  --owner-provisioning-consumer PATH  RiftVM first-owner request consumer
   --agent-source-url URL  Source repository recorded in image provenance
   --agent-source-ref SHA  Full source commit embedded in the Agent
   --expected-omarchy-ref SHA  Required unchanged Omarchy source commit
@@ -56,6 +58,7 @@ parse_args() {
       --output) (($# >= 2)) || fail "--output requires a path"; OUTPUT_IMAGE=$(absolute_path "$2"); shift 2 ;;
       --riftvm-guest-agent) (($# >= 2)) || fail "--riftvm-guest-agent requires a path"; AGENT_BINARY=$(absolute_path "$2"); shift 2 ;;
       --rift-session-agent-unit) (($# >= 2)) || fail "--rift-session-agent-unit requires a path"; SESSION_AGENT_UNIT=$(absolute_path "$2"); shift 2 ;;
+      --owner-provisioning-consumer) (($# >= 2)) || fail "--owner-provisioning-consumer requires a path"; OWNER_PROVISIONING_CONSUMER=$(absolute_path "$2"); shift 2 ;;
       --agent-source-url) (($# >= 2)) || fail "--agent-source-url requires a URL"; AGENT_SOURCE_URL=$2; shift 2 ;;
       --agent-source-ref) (($# >= 2)) || fail "--agent-source-ref requires a commit"; AGENT_SOURCE_REF=$2; shift 2 ;;
       --expected-omarchy-ref) (($# >= 2)) || fail "--expected-omarchy-ref requires a commit"; EXPECTED_OMARCHY_REF=$2; shift 2 ;;
@@ -74,6 +77,8 @@ validate_inputs() {
   [[ -f $BASE_IMAGE && ! -L $BASE_IMAGE ]] || fail "base image is missing or unsafe: $BASE_IMAGE"
   [[ -f $AGENT_BINARY && ! -L $AGENT_BINARY ]] || fail "Guest Agent is missing or unsafe: $AGENT_BINARY"
   [[ -f $SESSION_AGENT_UNIT && ! -L $SESSION_AGENT_UNIT ]] || fail "Session Agent unit is missing or unsafe: $SESSION_AGENT_UNIT"
+  [[ -f $OWNER_PROVISIONING_CONSUMER && ! -L $OWNER_PROVISIONING_CONSUMER ]] ||
+    fail "owner provisioning consumer is missing or unsafe: $OWNER_PROVISIONING_CONSUMER"
   grep -Fxq 'ReadWritePaths=/run/rift-agent/sessions /mnt/riftvm-shared' "$SESSION_AGENT_UNIT" ||
     fail "Session Agent unit does not permit the authenticated clipboard staging root"
   [[ $BASE_SHA256 =~ ^[0-9a-f]{64}$ ]] || fail "base SHA-256 must contain 64 lowercase hex characters"
@@ -132,6 +137,7 @@ rewrite_provenance() {
     !/^riftvm_guest_agent_source_ref=/ &&
     !/^riftvm_guest_agent_sha256=/ &&
     !/^riftvm_session_agent_unit_sha256=/ &&
+    !/^riftvm_owner_provisioning_consumer_sha256=/ &&
     !/^riftvm_integration_rebaked_at=/ &&
     !/^riftvm_integration_base_raw_sha256=/
   ' "$provenance" >"$staged"
@@ -140,6 +146,7 @@ rewrite_provenance() {
     printf 'riftvm_guest_agent_source_ref=%s\n' "$AGENT_SOURCE_REF"
     printf 'riftvm_guest_agent_sha256=%s\n' "$(sha256sum "$AGENT_BINARY" | awk '{print $1}')"
     printf 'riftvm_session_agent_unit_sha256=%s\n' "$(sha256sum "$SESSION_AGENT_UNIT" | awk '{print $1}')"
+    printf 'riftvm_owner_provisioning_consumer_sha256=%s\n' "$(sha256sum "$OWNER_PROVISIONING_CONSUMER" | awk '{print $1}')"
     printf 'riftvm_integration_rebaked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'riftvm_integration_base_raw_sha256=%s\n' "$BASE_SHA256"
   } >>"$staged"
@@ -232,10 +239,16 @@ rebake_image() {
   install -m644 "$SESSION_AGENT_UNIT" "$root/etc/systemd/user/rift-session-agent.service.rebake"
   mv -f -- "$root/etc/systemd/user/rift-session-agent.service.rebake" \
     "$root/etc/systemd/user/rift-session-agent.service"
+  install -m755 "$OWNER_PROVISIONING_CONSUMER" \
+    "$root/usr/local/libexec/riftvm-owner-provisioning.rebake"
+  mv -f -- "$root/usr/local/libexec/riftvm-owner-provisioning.rebake" \
+    "$root/usr/local/libexec/riftvm-owner-provisioning"
   rewrite_provenance "$root"
   cmp -s "$AGENT_BINARY" "$root/usr/local/sbin/rift-agent" || fail "installed Guest Agent differs from the pinned binary"
   cmp -s "$SESSION_AGENT_UNIT" "$root/etc/systemd/user/rift-session-agent.service" ||
     fail "installed Session Agent unit differs from the pinned source"
+  cmp -s "$OWNER_PROVISIONING_CONSUMER" "$root/usr/local/libexec/riftvm-owner-provisioning" ||
+    fail "installed owner provisioning consumer differs from the pinned source"
 
   btrfs property set -ts "$factory" ro false
   btrfs subvolume delete "$factory"
@@ -244,6 +257,8 @@ rebake_image() {
   cmp -s "$AGENT_BINARY" "$factory/usr/local/sbin/rift-agent" || fail "factory snapshot contains the wrong Guest Agent"
   cmp -s "$SESSION_AGENT_UNIT" "$factory/etc/systemd/user/rift-session-agent.service" ||
     fail "factory snapshot contains the wrong Session Agent unit"
+  cmp -s "$OWNER_PROVISIONING_CONSUMER" "$factory/usr/local/libexec/riftvm-owner-provisioning" ||
+    fail "factory snapshot contains the wrong owner provisioning consumer"
   grep -qxF "riftvm_guest_agent_source_ref=$AGENT_SOURCE_REF" "$factory/usr/share/omarchy-aarch64/image-build.txt" ||
     fail "factory snapshot contains the wrong Agent provenance"
 
