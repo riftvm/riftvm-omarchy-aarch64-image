@@ -6,7 +6,10 @@
 
 RIFTVM_OWNER_REQUEST=${RIFTVM_OWNER_REQUEST:-/run/riftvm-owner-provisioning.json}
 RIFTVM_OWNER_ZONEINFO=${RIFTVM_OWNER_ZONEINFO:-/usr/share/zoneinfo}
-RIFTVM_OWNER_WAIT_TICKS=${RIFTVM_OWNER_WAIT_TICKS:-120}
+# Zero means wait for the authenticated RiftVM request for the lifetime of the
+# first-boot service. A positive value remains available to tests and recovery
+# environments that deliberately want a bounded wait.
+RIFTVM_OWNER_WAIT_TICKS=${RIFTVM_OWNER_WAIT_TICKS:-0}
 RIFTVM_OWNER_REQUEST_UID=${RIFTVM_OWNER_REQUEST_UID:-0}
 
 riftvm_owner_request_fields() {
@@ -89,7 +92,7 @@ riftvm_load_owner_provisioning() {
 
 riftvm_wait_owner_provisioning() {
   local tick status
-  for ((tick = 0; tick < RIFTVM_OWNER_WAIT_TICKS; tick++)); do
+  for ((tick = 0; RIFTVM_OWNER_WAIT_TICKS == 0 || tick < RIFTVM_OWNER_WAIT_TICKS; tick++)); do
     riftvm_load_owner_provisioning && return 0
     status=$?
     ((status == 1)) || return "$status"

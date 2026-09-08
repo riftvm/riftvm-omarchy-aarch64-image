@@ -44,6 +44,15 @@ bash -n "$OMARCHY_TEST_SOURCE/install/post-install/pacman.sh"
 pass "all project and modified runtime scripts parse as Bash"
 
 (
+  unset RIFTVM_OWNER_WAIT_TICKS
+  # shellcheck source=/dev/null
+  source "$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/riftvm-owner-provisioning"
+  [[ $RIFTVM_OWNER_WAIT_TICKS == 0 ]] ||
+    fail "factory owner provisioning can time out before the user submits the Host form"
+  pass "factory owner provisioning waits for the authenticated Host request"
+)
+
+(
   # shellcheck source=../bin/build-image
   source "$ROOT/bin/build-image"
   fixture=$(mktemp -d)

@@ -1048,9 +1048,11 @@ stage_first_boot_provisioning() {
   perl -0pi.bak -e 's{^(\s*)ttfx -i "\$LOGO_PATH"}{$1return 0 # RiftVM: keep the first-boot greeter static and resize-safe.\n$1ttfx -i "\$LOGO_PATH"}m' "$owner"
   rm -f -- "$owner.bak"
 
-  # Prefer credentials delivered by RiftVM's authenticated Guest Agent. Keep the
-  # original tty form as a bounded fallback for older hosts. Patch the pinned
-  # upstream runtime at build time and fail closed if its function shape drifts.
+  # Prefer credentials delivered by RiftVM's authenticated Guest Agent. The
+  # product image waits for that request instead of racing a person against a
+  # short setup deadline. A deliberately bounded wait can still be injected by
+  # recovery environments and tests. Patch the pinned upstream runtime at build
+  # time and fail closed if its function shape drifts.
   local setup_source_occurrences run_setup_occurrences main_occurrences
   # shellcheck disable=SC2016 # Match the literal variable reference in the staged script.
   setup_source_occurrences=$(grep -Fc 'source "$OMARCHY_PATH/install/provisioning/setup-form.sh"' "$owner")
@@ -1065,11 +1067,9 @@ stage_first_boot_provisioning() {
   perl -0pi.bak -e 's~run_setup\(\) \{\n  local status\n\n  while true; do~run_setup() {\n  local status=0 automated=\${RIFTVM_OWNER_AUTOMATED:-0}\n\n  while (( ! automated )); do~' "$owner"
   rm -f -- "$owner.bak"
 
-  # The upstream entry point blocks on a tty greeter before run_setup. Give the
-  # authenticated Host a bounded opportunity first; if it has already staged
-  # an owner request, bypass the greeter and enter the same provisioning worker
-  # with the validated fields loaded in this shell. Older hosts still see the
-  # untouched interactive flow after the bounded wait.
+  # The upstream entry point blocks on a tty greeter before run_setup. Wait for
+  # the authenticated Host request first, then bypass the greeter and enter the
+  # same provisioning worker with the validated fields loaded in this shell.
   main_occurrences=$(grep -Fc 'main() {' "$owner")
   ((main_occurrences == 1)) ||
     fail "expected one first-boot main entry, found $main_occurrences"
