@@ -24,17 +24,28 @@ jobs:
         run: |
           set -euo pipefail
           source ./sources.env
-          official_tag=$(gh api repos/basecamp/omarchy/releases/latest --jq .tag_name)
+          official_tag=$(gh api repos/omacom/omarchy/releases/latest --jq .tag_name)
           official_version=${official_tag#v}
           if [[ "$official_version" == "$OMARCHY_AARCH64_VERSION" ]]; then
             echo "Factory source already tracks official Omarchy $official_tag."
             exit 0
+          fi
+          arm_port_tag=$(gh api \
+            "repos/riverscn/omarchy-aarch64/git/matching-refs/tags/v${official_version}-aarch64" \
+            --jq 'map(.ref | split("/")[-1]) | sort | last // ""')
+          if [[ -n "$arm_port_tag" ]]; then
+            arm_port_status="A matching ARM64 port tag is available: **${arm_port_tag}**. Resolve it to an immutable commit and run the complete local and native VM acceptance gates before changing the Factory pin."
+          else
+            arm_port_status="No matching ARM64 port tag is published yet. Keep the current Factory pin; do not substitute the upstream x86-oriented source for the reviewed ARM64 port."
           fi
           title="Track official Omarchy ${official_tag} in the RiftVM factory image"
           existing=$(gh issue list --state open --search "$title in:title" --json number --jq length)
           [[ "$existing" == 0 ]] || exit 0
           gh issue create --title "$title" --body "Official Omarchy released **${official_tag}**, while the RiftVM AArch64 factory is pinned to **${OMARCHY_AARCH64_VERSION}** at \`${OMARCHY_AARCH64_REF}\`.
 
+          ${arm_port_status}
+
           Port and review the AArch64 release, update immutable source/package refs, build a draft Factory image, and pass clean-workspace, input, display, sharing, update, and rollback acceptance before promotion.
 
-          Official release: https://github.com/basecamp/omarchy/releases/tag/${official_tag}"
+          Official release: https://github.com/omacom/omarchy/releases/tag/${official_tag}
+          ARM64 port: https://github.com/riverscn/omarchy-aarch64/tags"

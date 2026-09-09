@@ -576,7 +576,8 @@ grep -Fq "cron: '17 8 * * 1'" "$ROOT/.github/workflows/release-image.yml" &&
   grep -Fq 'riftvm.weekly.$(date -u +%Y%m%d)' "$ROOT/.github/workflows/release-image.yml" ||
   fail "weekly draft Factory rebuilds are not scheduled deterministically"
 grep -Fq "cron: '41 7 * * *'" "$ROOT/.github/workflows/check-omarchy-upstream.yml" &&
-  grep -Fq 'repos/basecamp/omarchy/releases/latest' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
+  grep -Fq 'repos/omacom/omarchy/releases/latest' "$ROOT/.github/workflows/check-omarchy-upstream.yml" &&
+  grep -Fq 'repos/riverscn/omarchy-aarch64/git/matching-refs/tags/' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
   fail "official Omarchy stable releases are not checked daily"
 if grep -R -Fq 'everettjf/omarchy-aarch64-image' "$ROOT/.github" "$ROOT/bin"; then
   fail "active image automation still accesses the personal legacy repository"
