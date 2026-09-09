@@ -68,6 +68,22 @@ mode_signature() {
   printf '%s\n' "$signature"
 }
 
+# Hyprland 0.56 on RiftVM's virtio-gpu can consume keyboard input without
+# presenting the damaged frame until a pointer event arrives. Continuous frame
+# scheduling avoids that stall. Recheck after configuration reloads; do not
+# inject pointer events or change keyboard delivery to mask a rendering failure.
+reconcile_frame_scheduling() {
+  local enabled output
+  discover_hyprland_instance || return 0
+  enabled=$("$HYPRCTL" -j getoption debug:vfr 2>/dev/null | jq -r '.bool' 2>/dev/null) || return 0
+  [[ $enabled == true ]] || return 0
+  if output=$("$HYPRCTL" eval 'hl.config({ debug = { vfr = false } })' 2>&1); then
+    log_debug "requested continuous rendering for virtio-gpu: $output"
+  else
+    log_debug "failed to enable continuous rendering: $output"
+  fi
+}
+
 reconcile_current_mode() {
   local connector connector_name preferred current
   discover_hyprland_instance || return 0
@@ -119,6 +135,7 @@ log_debug "virtio_gpu DRM device detected"
 # calls race with this setting on current Omarchy: each reload can restore the
 # compositor's cached old `preferred` mode, causing old/new scanouts to flap
 # until Hyprland eventually leaves the new output black.
+reconcile_frame_scheduling
 reconcile_current_mode
 previous=$(mode_signature)
 log_debug "initial DRM signature: $previous"
@@ -132,5 +149,6 @@ while sleep "$POLL_INTERVAL"; do
     # retries only if Hyprland did not accept it.
     sleep 0.2
   fi
+  reconcile_frame_scheduling
   reconcile_current_mode
 done

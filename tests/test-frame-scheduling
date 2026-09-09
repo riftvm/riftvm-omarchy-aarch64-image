@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+# Load only functions, not the Linux daemon's lock and polling loop.
+source <(sed '/^install -d -m 0700/,$d' "$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/omarchy-riftvm-display-watch")
+discover_hyprland_instance() { return 0; }
+log_debug() { :; }
+hyprctl() {
+  if [[ $1 == -j ]]; then
+    [[ $state != unavailable ]] || return 1
+    printf '{"bool":%s}\n' "$state"
+  else
+    printf '%s\n' "$*" >>"$fixture/applied"
+  fi
+}
+state=true
+reconcile_frame_scheduling
+[[ $(wc -l <"$fixture/applied") -eq 1 ]]
+grep -Fxq 'eval hl.config({ debug = { vfr = false } })' "$fixture/applied"
+state=false
+reconcile_frame_scheduling
+[[ $(wc -l <"$fixture/applied") -eq 1 ]]
+# A configuration reload re-enables VFR; the next poll must restore the fix.
+state=true
+reconcile_frame_scheduling
+[[ $(wc -l <"$fixture/applied") -eq 2 ]]
+state=unavailable
+reconcile_frame_scheduling
+[[ $(wc -l <"$fixture/applied") -eq 2 ]]
+echo 'PASS: frame scheduling applies only when needed, survives reload, and tolerates unavailable IPC'

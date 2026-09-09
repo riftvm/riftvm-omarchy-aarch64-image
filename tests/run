@@ -772,6 +772,7 @@ grep -Fq 'mode = "preferred"' "$sddm_hyprland" ||
   watcher_pid=
 )
 pass "RiftVM display watcher reacts to virtio-gpu mode changes"
+bash "$ROOT/tests/test-frame-scheduling"
 
 (
   fixture=$(mktemp -d)

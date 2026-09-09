@@ -163,6 +163,15 @@ Package a local RiftVM Release layout:
   --output build/release-assets
 ```
 
+## Display compatibility
+
+The virtio-gpu display watcher disables Hyprland's `debug:vfr` on RiftVM.
+With Hyprland 0.56, keyboard input can reach applications while their frames
+remain stale until the pointer moves. Continuous rendering avoids this stall;
+the watcher reapplies it after configuration reloads. This trades some idle
+rendering efficiency for responsive updates and should be reevaluated when the
+compositor or virtual GPU changes. It does not synthesize mouse input.
+
 ## Tests
 
 Run the static contract and release-packager suite with the adapted Omarchy
