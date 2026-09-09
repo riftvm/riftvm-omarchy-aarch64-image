@@ -6,10 +6,6 @@ use Fcntl qw(SEEK_SET);
 
 my $destination = shift @ARGV or die "usage: decode-riftvm-sparse OUTPUT_RAW\n";
 my $expected_magic = "RiftVM-SPARSE-1\n";
-if (@ARGV) {
-    shift(@ARGV) eq '--legacy-ezvm' or die "unknown decoder option\n";
-    $expected_magic = "EZVM-SPARSE-1\n";
-}
 @ARGV == 0 or die "unexpected decoder arguments\n";
 binmode STDIN;
 open my $output, '>', $destination or die "open $destination: $!\n";
