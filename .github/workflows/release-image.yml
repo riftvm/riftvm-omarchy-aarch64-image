@@ -6,9 +6,8 @@ on:
     # the Omarchy and RiftVM source revisions immutable. Output stays a draft
     # until native guest acceptance signs and promotes its Factory assets.
     - cron: '17 8 * * 1'
-  push:
-    tags:
-      - 'v*'
+  # Release tags are outputs of this workflow. Publishing a draft must not
+  # trigger another build of the same release.
   workflow_dispatch:
     inputs:
       release_tag:
@@ -47,7 +46,6 @@ jobs:
         id: release
         env:
           REQUESTED_TAG: ${{ inputs.release_tag }}
-          REF_NAME: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -57,7 +55,8 @@ jobs:
             source ./sources.env
             tag="v${OMARCHY_AARCH64_VERSION}-riftvm.weekly.$(date -u +%Y%m%d)"
           else
-            tag=$REF_NAME
+            echo "Unsupported event: $EVENT_NAME" >&2
+            exit 1
           fi
           [[ $tag =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
           echo "tag=$tag" >> "$GITHUB_OUTPUT"

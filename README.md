@@ -136,6 +136,10 @@ A successful build also emits package inventories and
 `build/image-provenance.txt`, including the pinned RiftVM Guest Agent source
 revision and the digest of the exact binary installed into the image.
 
+The image release workflow runs manually or on its weekly schedule. For a manual
+build, choose a new `release_tag`. Publishing a release or pushing a tag does not
+start another image build; existing releases are protected against overwriting.
+
 When the operating-system and Omarchy package graph is already accepted and
 only the statically linked RiftVM Guest Agent changed, the manual release workflow
 also supports an integration-only rebake. Supply both `base_release_tag` and
