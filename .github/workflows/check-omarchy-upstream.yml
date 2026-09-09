@@ -38,6 +38,15 @@ jobs:
           else
             arm_port_status="No matching ARM64 port tag is published yet. Keep the current Factory pin; do not substitute the upstream x86-oriented source for the reviewed ARM64 port."
           fi
+          {
+            echo "## Omarchy update available"
+            echo "Official: ${official_tag}; factory source: ${OMARCHY_AARCH64_VERSION}."
+            echo "$arm_port_status"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ $(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues) != true ]]; then
+            echo "::notice::Issues are disabled; the update is recorded in the job summary."
+            exit 0
+          fi
           title="Track official Omarchy ${official_tag} in the RiftVM factory image"
           existing=$(gh issue list --state open --search "$title in:title" --json number --jq length)
           [[ "$existing" == 0 ]] || exit 0
