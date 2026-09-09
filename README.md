@@ -61,11 +61,16 @@ The distributed image is intentionally unencrypted. A reusable image cannot
 safely contain a shared disk-encryption key; per-machine encryption requires a
 future installer that creates a unique container during import.
 
-## Installation status
+## Install RiftVM
 
-RiftVM 0.1.0 is in development for Apple silicon and macOS 27. No public App
-release or Homebrew cask is available yet. See [RiftVM](https://riftvm.github.io/)
-for release availability.
+RiftVM requires **macOS 27 or later and Apple silicon**.
+
+```sh
+brew install --cask riftvm/tap/riftvm
+```
+
+Or download the app from [GitHub Releases](https://github.com/riftvm/riftvm/releases/latest).
+Open RiftVM and choose **Create Omarchy Workspace**. See [riftvm.com](https://riftvm.com) for details.
 
 The unified App creates an Omarchy workspace from an exact, signed factory
 manifest. It verifies the Ed25519 signature and every image part, keeps a shared
