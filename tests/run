@@ -1105,3 +1105,5 @@ fi
 [[ ! -e "$invalid_fixture/rejected.raw" ]] || fail "invalid options created an output"
 rm -rf -- "$invalid_fixture"
 pass "decoder rejects unsupported options"
+
+python3 "$ROOT/tests/test-first-run-update"
