@@ -3,30 +3,32 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
-# Load only functions, not the Linux daemon's lock and polling loop.
+export OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm"
+export OMARCHY_RIFTVM_HYPRCTL=hyprctl
+mkdir -p "$fixture/drm/card0-Virtual-1"
+printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
+printf '1280x720\n' >"$fixture/drm/card0-Virtual-1/modes"
 source <(sed '/^install -d -m 0700/,$d' "$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/omarchy-riftvm-display-watch")
-discover_hyprland_instance() { return 0; }
 log_debug() { :; }
 hyprctl() {
-  if [[ $1 == -j ]]; then
-    [[ $state != unavailable ]] || return 1
-    printf '{"bool":%s}\n' "$state"
+  printf '%s\n' "$*" >>"$fixture/calls"
+  if [[ $* == '-j monitors all' ]]; then
+    printf '[{"name":"Virtual-1","width":1280,"height":720}]\n'
+  elif [[ $1 == eval ]]; then
+    printf 'ok\n'
   else
-    printf '%s\n' "$*" >>"$fixture/applied"
+    echo "Unexpected compositor operation: $*" >&2
+    return 1
   fi
 }
-state=true
-reconcile_frame_scheduling
-[[ $(wc -l <"$fixture/applied") -eq 1 ]]
-grep -Fxq 'eval hl.config({ debug = { vfr = false } })' "$fixture/applied"
-state=false
-reconcile_frame_scheduling
-[[ $(wc -l <"$fixture/applied") -eq 1 ]]
-# A configuration reload re-enables VFR; the next poll must restore the fix.
-state=true
-reconcile_frame_scheduling
-[[ $(wc -l <"$fixture/applied") -eq 2 ]]
-state=unavailable
-reconcile_frame_scheduling
-[[ $(wc -l <"$fixture/applied") -eq 2 ]]
-echo 'PASS: frame scheduling applies only when needed, survives reload, and tolerates unavailable IPC'
+# Stable polling must not change any compositor option, including user VFR.
+reconcile_current_mode
+reconcile_current_mode
+[[ $(grep -c '^-j monitors all$' "$fixture/calls") -eq 2 ]]
+! grep -q '^eval' "$fixture/calls"
+# A real resize still updates the monitor, without changing debug:vfr.
+printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+reconcile_current_mode
+grep -Fxq 'eval hl.monitor({ output = "Virtual-1", mode = "1920x1080", position = "auto", scale = "auto" })' "$fixture/calls"
+! grep -Eq 'vfr|hl.config|getoption' "$fixture/calls"
+echo 'PASS: mode reconciliation preserves compositor frame scheduling and applies real resizes'
