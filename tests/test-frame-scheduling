@@ -28,7 +28,50 @@ reconcile_current_mode
 ! grep -q '^eval' "$fixture/calls"
 # A real resize still updates the monitor, without changing debug:vfr.
 printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
-reconcile_current_mode
+! reconcile_current_mode
 grep -Fxq 'eval hl.monitor({ output = "Virtual-1", mode = "1920x1080", position = "auto", scale = "auto" })' "$fixture/calls"
 ! grep -Eq 'vfr|hl.config|getoption' "$fixture/calls"
 echo 'PASS: mode reconciliation preserves compositor frame scheduling and applies real resizes'
+
+# Exercise the actual scheduling function, with real fixture DRM reads and IPC.
+# No wall-clock sleeps are needed: each call represents one normal poll tick.
+sleep() { :; }
+printf '1280x720\n' >"$fixture/drm/card0-Virtual-1/modes"
+: >"$fixture/calls"
+previous=$(mode_signature)
+ticks_until_audit=0
+watch_tick
+for ((i=0; i<60; i++)); do watch_tick; done
+[[ $(grep -c '^-j monitors all$' "$fixture/calls") -eq 7 ]]
+! grep -q '^eval' "$fixture/calls"
+echo 'PASS: 60 stable ticks use 6 periodic compositor queries plus startup (formerly 61)'
+
+# A change bypasses the idle countdown; an unapplied request retries next tick.
+printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+watch_tick
+[[ $(grep -c '^eval' "$fixture/calls") -eq 1 ]]
+watch_tick
+[[ $(grep -c '^eval' "$fixture/calls") -eq 2 ]]
+# Simulate compositor acceptance, then a reload with unchanged DRM modes.
+hyprctl() {
+  printf '%s\n' "$*" >>"$fixture/calls"
+  if [[ $* == '-j monitors all' ]]; then
+    cat "$fixture/monitors"
+  else
+    printf 'ok\n'
+  fi
+}
+printf '[{"name":"Virtual-1","width":1920,"height":1080}]\n' >"$fixture/monitors"
+watch_tick
+[[ $ticks_until_audit -eq 10 ]]
+printf '[{"name":"Virtual-1","width":1280,"height":720}]\n' >"$fixture/monitors"
+for ((i=0; i<9; i++)); do watch_tick; done
+[[ $(grep -c '^eval' "$fixture/calls") -eq 2 ]]
+watch_tick
+[[ $(grep -c '^eval' "$fixture/calls") -eq 3 ]]
+# An unavailable compositor/session must also retain fast retries.
+discover_hyprland_instance() { return 1; }
+watch_tick
+[[ $ticks_until_audit -eq 0 ]]
+! grep -Eq 'vfr|hl.config|getoption' "$fixture/calls"
+echo 'PASS: resize, unconfirmed request, periodic reload repair, and unavailable session retain recovery'

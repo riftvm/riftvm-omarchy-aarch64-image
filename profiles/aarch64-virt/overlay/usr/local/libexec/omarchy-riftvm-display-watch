@@ -72,8 +72,8 @@ mode_signature() {
 # The host now preserves pending damage across asynchronous presentation;
 # forcing continuous rendering here masks regressions and prevents idle sleep.
 reconcile_current_mode() {
-  local connector connector_name preferred current
-  discover_hyprland_instance || return 0
+  local connector connector_name preferred current pending=0
+  discover_hyprland_instance || return 1
   for connector in "$DRM_ROOT"/card*-*; do
     [[ -f $connector/status && $(<"$connector/status") == connected ]] || continue
     [[ -s $connector/modes ]] || continue
@@ -94,6 +94,7 @@ reconcile_current_mode() {
     # Current Omarchy uses Hyprland's Lua configuration parser. `keyword`
     # prints a rejection while still exiting zero there, so use the same
     # `hyprctl eval` API as Omarchy's own monitor helpers.
+    pending=1
     if output=$("$HYPRCTL" eval \
       "hl.monitor({ output = \"$connector_name\", mode = \"$preferred\", position = \"auto\", scale = \"auto\" })" 2>&1); then
       log_debug "requested $connector_name mode $preferred (was ${current:-unknown}): $output"
@@ -101,6 +102,32 @@ reconcile_current_mode() {
       log_debug "failed to apply $connector_name mode $preferred (was ${current:-unknown}): $output"
     fi
   done
+  return "$pending"
+}
+
+# Keep cheap DRM polling responsive, but avoid compositor IPC on every idle tick.
+# Retry unconfirmed mode requests on the next tick. A periodic audit also repairs
+# compositor reloads/restarts that do not change the DRM signature.
+audit_ticks=10
+ticks_until_audit=0
+previous=""
+watch_tick() {
+  local current
+  current=$(mode_signature)
+  if [[ $current != "$previous" ]]; then
+    log_debug "DRM signature changed: $current"
+    previous=$current
+    ticks_until_audit=0
+    sleep 0.2
+  fi
+  if (( ticks_until_audit > 0 )); then
+    ticks_until_audit=$((ticks_until_audit - 1))
+  fi
+  if (( ticks_until_audit == 0 )); then
+    if reconcile_current_mode; then
+      ticks_until_audit=$audit_ticks
+    fi
+  fi
 }
 
 install -d -m 0700 "$(dirname "$LOG_FILE")"
@@ -122,18 +149,9 @@ log_debug "virtio_gpu DRM device detected"
 # calls race with this setting on current Omarchy: each reload can restore the
 # compositor's cached old `preferred` mode, causing old/new scanouts to flap
 # until Hyprland eventually leaves the new output black.
-reconcile_current_mode
 previous=$(mode_signature)
 log_debug "initial DRM signature: $previous"
+watch_tick
 while sleep "$POLL_INTERVAL"; do
-  current=$(mode_signature)
-  if [[ $current != "$previous" ]]; then
-    log_debug "DRM signature changed: $current"
-    previous=$current
-    # Give virtio-gpu's connector and mode list a short interval to settle,
-    # then apply the final preferred mode once. The normal reconciliation below
-    # retries only if Hyprland did not accept it.
-    sleep 0.2
-  fi
-  reconcile_current_mode
+  watch_tick
 done
