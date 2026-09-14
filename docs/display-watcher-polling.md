@@ -41,3 +41,13 @@ this watcher. Overlay changes require a full image rebuild.
 | Refresh-aware presentation and 120 Hz | Requires display support and measured input-to-photon latency before design changes. |
 | Watcher polling overhead | This PR reduces idle compositor queries; one-second DRM polling remains. Live qualification is pending. |
 | Matched Try Omarchy comparison | Requires both environments with matched resources, resolution and workloads. |
+
+## Native follow-up qualification
+
+On 2026-09-13 the exact candidate watcher was installed in a disposable
+4-CPU/8-GiB Guest. A 65-second real Hyprland trace repaired an injected 1280x720
+mode back to the DRM preferred 1024x656. VFR stayed enabled. A cold start then
+passed file import, text/PNG clipboard, 1024x656-to-880x528 resize and six
+size/focus cycles across two displays. Keyboard output and the final blue frame
+were observed after the cycles. The Guest was stopped. These checks qualify
+resize/recovery correctness; they do not measure energy or 120 FPS throughput.
