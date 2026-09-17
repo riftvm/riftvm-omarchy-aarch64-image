@@ -362,53 +362,44 @@ jobs:
             --title "Omarchy AArch64 VM for RiftVM $RELEASE_TAG" \
             --notes-file RELEASE_NOTES.md
 
-          # Upload with bounded parallelism, a timeout per attempt, and retries.
-          # `gh release create` also uploads concurrently, but waits without a
-          # bound when one transfers stalls: a hosted run sat on a ~2 GiB sparse
-          # part for the better part of an hour while every other asset had
-          # already landed. The endpoint also throttles a single connection to a
-          # few hundred KB/s at times, so parallel requests are what keeps the
-          # release moving; a stalled request is retried instead of blocking.
-          readonly upload_timeout=3600
-          readonly upload_attempts=3
+          # Upload in rounds and retry only what is missing. The asset endpoint
+          # intermittently answers HTTP 500 (`Error creating asset temp dir` /
+          # `Error saving asset`), which `gh release create` treats as fatal: one
+          # run left a release with 9 of 25 sparse parts before failing. A round
+          # keeps the parts that landed, so each pass makes progress, and the
+          # digest check below is still the gate that everything arrived.
+          readonly upload_timeout=1800
           readonly upload_parallel=4
+          readonly upload_rounds=15
           upload_one() {
-            local asset=$1 name=${asset##*/} attempt
-            if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq -- "$name"; then
-              echo "Asset already uploaded: $name"
-              return 0
-            fi
-            for ((attempt = 1; attempt <= upload_attempts; attempt++)); do
-              echo "Uploading $name (attempt $attempt of $upload_attempts)"
-              if timeout "$upload_timeout" gh release upload "$RELEASE_TAG" "$asset" --clobber; then
-                return 0
-              fi
-              echo "Upload did not finish within ${upload_timeout}s; retrying $name" >&2
+            timeout "$upload_timeout" gh release upload "$RELEASE_TAG" "$1" --clobber
+          }
+          parallel_upload() {
+            local -a pids=()
+            local asset pid
+            for asset in "$@"; do
+              while ((${#pids[@]} >= upload_parallel)); do
+                wait "${pids[0]}" || true
+                pids=("${pids[@]:1}")
+              done
+              upload_one "$asset" &
+              pids+=($!)
             done
-            echo "Could not upload release asset: $name" >&2
-            return 1
+            for pid in "${pids[@]}"; do wait "$pid" || true; done
           }
-
-          pids=()
-          failures=0
-          reap() {
-            if ! wait "$1"; then failures=$((failures + 1)); fi
-          }
-          for asset in "${assets[@]}"; do
-            while ((${#pids[@]} >= upload_parallel)); do
-              reap "${pids[0]}"
-              pids=("${pids[@]:1}")
+          for ((round = 1; round <= upload_rounds; round++)); do
+            mapfile -t uploaded < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+            missing=()
+            for asset in "${assets[@]}"; do
+              printf '%s\n' "${uploaded[@]}" | grep -Fxq -- "${asset##*/}" || missing+=("$asset")
             done
-            upload_one "$asset" &
-            pids+=($!)
+            ((${#missing[@]} == 0)) && {
+              echo "All ${#assets[@]} release assets uploaded"
+              break
+            }
+            echo "Upload round $round: ${#missing[@]} of ${#assets[@]} asset(s) still missing"
+            parallel_upload "${missing[@]}"
           done
-          for pid in "${pids[@]}"; do
-            reap "$pid"
-          done
-          ((failures == 0)) || {
-            echo "Failed to upload $failures release asset(s)" >&2
-            exit 1
-          }
 
           release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")
