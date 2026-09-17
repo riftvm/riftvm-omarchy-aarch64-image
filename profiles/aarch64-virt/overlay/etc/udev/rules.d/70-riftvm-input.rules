@@ -3,4 +3,10 @@
 # uinput producer remains available to an unprivileged Wayland compositor.
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="RiftVM Keyboard", ENV{ID_INPUT}="1", ENV{ID_INPUT_KEY}="1", ENV{ID_INPUT_KEYBOARD}="1", ENV{ID_SEAT}="seat0", TAG+="seat", TAG+="uaccess"
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="RiftVM Relative Pointer", ENV{ID_INPUT}="1", ENV{ID_INPUT_MOUSE}="1", ENV{ID_SEAT}="seat0", TAG+="seat", TAG+="uaccess"
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="RiftVM Absolute Pointer", ENV{ID_INPUT}="1", ENV{ID_INPUT_TABLET}="1", ENV{ID_SEAT}="seat0", TAG+="seat", TAG+="uaccess"
+# The absolute pointer reports ABS_X/ABS_Y plus BTN_LEFT/RIGHT/MIDDLE and has no
+# pen or stylus bits, which is exactly the "absolute mouse" shape systemd's
+# input_id builtin labels ID_INPUT_MOUSE (the VMware USB mouse path). Tagging it
+# as a tablet instead sends libinput down evdev_tablet_create(), where a device
+# without tool axes never becomes a pointer: the compositor then has no device to
+# move the cursor with and every absolute event is discarded.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="RiftVM Absolute Pointer", ENV{ID_INPUT}="1", ENV{ID_INPUT_MOUSE}="1", ENV{ID_SEAT}="seat0", TAG+="seat", TAG+="uaccess"

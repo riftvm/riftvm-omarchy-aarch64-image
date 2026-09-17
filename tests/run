@@ -1048,6 +1048,11 @@ grep -Fq 'ATTRS{name}=="RiftVM Relative Pointer"' "$riftvm_input_rules" ||
   fail "RiftVM relative pointer is not classified for the graphical seat"
 grep -Fq 'ATTRS{name}=="RiftVM Absolute Pointer"' "$riftvm_input_rules" ||
   fail "RiftVM absolute pointer is not classified for the graphical seat"
+absolute_pointer_rule=$(grep -F 'ATTRS{name}=="RiftVM Absolute Pointer"' "$riftvm_input_rules")
+[[ $absolute_pointer_rule == *'ENV{ID_INPUT_MOUSE}="1"'* ]] ||
+  fail "RiftVM absolute pointer is not classified as an absolute mouse"
+[[ $absolute_pointer_rule != *'ID_INPUT_TABLET'* ]] ||
+  fail "RiftVM absolute pointer is tagged as a tablet; libinput drops it because it has no pen tool"
 grep -Fq 'etc/udev/rules.d/70-riftvm-input.rules' "$ROOT/bin/build-image" ||
   fail "target validation does not require the RiftVM input rules"
 grep -Fq "zone1970.tab | sort -u" "$ROOT/bin/build-image" ||
