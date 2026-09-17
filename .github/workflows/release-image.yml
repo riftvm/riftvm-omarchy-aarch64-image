@@ -324,12 +324,13 @@ jobs:
 
       - name: Package split RiftVM release assets
         env:
-          # GitHub's asset upload endpoint stalls on multi-gigabyte requests from
-          # hosted runners: the default 1900 MiB parts sometimes never finish.
-          # Smaller parts keep every request short, so a stall costs one part
-          # instead of the whole image, and the installer reads the manifest
-          # rather than assuming a part count.
-          OMARCHY_RIFTVM_PART_SIZE_MIB: '512'
+          # The asset endpoint accepts a hosted runner at roughly half a megabyte
+          # per second, so the default 1900 MiB parts never finish before the
+          # upload timeout: two runs sat on a part for the better part of an hour
+          # and produced nothing. 128 MiB parts keep every request inside the
+          # timeout with room to spare, and both the installer and the app read
+          # the part list from the manifest rather than assuming a count.
+          OMARCHY_RIFTVM_PART_SIZE_MIB: '128'
         run: |
           set -euo pipefail
           ./bin/package-riftvm-release \
@@ -368,7 +369,7 @@ jobs:
           # already landed. The endpoint also throttles a single connection to a
           # few hundred KB/s at times, so parallel requests are what keeps the
           # release moving; a stalled request is retried instead of blocking.
-          readonly upload_timeout=1800
+          readonly upload_timeout=3600
           readonly upload_attempts=3
           readonly upload_parallel=4
           upload_one() {
