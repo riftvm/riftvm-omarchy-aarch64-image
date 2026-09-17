@@ -323,6 +323,13 @@ jobs:
           key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}-${{ steps.sources.outputs.cache_week }}
 
       - name: Package split RiftVM release assets
+        env:
+          # GitHub's asset upload endpoint stalls on multi-gigabyte requests from
+          # hosted runners: the default 1900 MiB parts sometimes never finish.
+          # Smaller parts keep every request short, so a stall costs one part
+          # instead of the whole image, and the installer reads the manifest
+          # rather than assuming a part count.
+          OMARCHY_RIFTVM_PART_SIZE_MIB: '512'
         run: |
           set -euo pipefail
           ./bin/package-riftvm-release \
@@ -352,8 +359,36 @@ jobs:
             --draft \
             --target "$GITHUB_SHA" \
             --title "Omarchy AArch64 VM for RiftVM $RELEASE_TAG" \
-            --notes-file RELEASE_NOTES.md \
-            "${assets[@]}"
+            --notes-file RELEASE_NOTES.md
+
+          # Upload one asset per request under a timeout. `gh release create`
+          # uploads its assets concurrently, and a stalled multi-gigabyte sparse
+          # part keeps the step waiting with no bound: a hosted run sat on a
+          # 1.9 GiB part for the better part of an hour while every other asset
+          # had already landed. A bounded, retried, one-at-a-time upload turns a
+          # silent stall into a visible retry.
+          readonly upload_timeout=3600
+          readonly upload_attempts=3
+          for asset in "${assets[@]}"; do
+            name=${asset##*/}
+            if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq -- "$name"; then
+              echo "Asset already uploaded: $name"
+              continue
+            fi
+            uploaded=0
+            for ((attempt = 1; attempt <= upload_attempts; attempt++)); do
+              echo "Uploading $name (attempt $attempt of $upload_attempts)"
+              if timeout "$upload_timeout" gh release upload "$RELEASE_TAG" "$asset" --clobber; then
+                uploaded=1
+                break
+              fi
+              echo "Upload did not finish within ${upload_timeout}s; retrying $name" >&2
+            done
+            ((uploaded == 1)) || {
+              echo "Could not upload release asset: $name" >&2
+              exit 1
+            }
+          done
 
           release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")
