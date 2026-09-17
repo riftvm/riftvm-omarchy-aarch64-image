@@ -37,3 +37,22 @@ jobs:
             echo "PROBE-RESULT release-asset: TIMEOUT after $(( $(date +%s) - start ))s for 128 MiB"
           fi
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+
+      - name: Probe artifact upload
+        id: artifact
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          echo "start=$start" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: probe-payload
+          path: payload.bin
+          compression-level: 0
+          retention-days: 1
+
+      - name: Report artifact result
+        run: |
+          set -euo pipefail
+          echo "PROBE-RESULT artifact: finished at $(date -u +%H:%M:%S) (step timings show the duration)"
