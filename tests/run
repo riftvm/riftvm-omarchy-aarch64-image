@@ -718,6 +718,10 @@ grep -Fq 'background themeTransition' "$display_watch" ||
   ln -s "$fixture/drivers/virtio_gpu" "$fixture/drm/card0/device/driver"
   printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
   printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+  # Start from a compositor that already runs the initial preferred mode, so the
+  # only settled mode change below is the one this test injects. Otherwise the
+  # startup reconciliation repaints once before the injected change does.
+  printf '[{"name":"Virtual-1","width":1920,"height":1080}]\n' >"$fixture/hyprctl.state"
   # Hyprland reports an applied mode back on the next monitor query. Mirror that
   # here so the watcher can settle and the repaint assertion below can tell a
   # single settled transition apart from a retry loop.
@@ -762,6 +766,8 @@ HYPRCTL
   watcher_pid=$!
   sleep 0.1
   : >"$fixture/hyprctl.log"
+  [[ ! -s $fixture/shell.log ]] ||
+    fail "RiftVM display watcher repainted the background without a mode change"
   printf '2560x1440\n1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
   for _ in {1..40}; do
     if grep -Fxq 'eval hl.monitor({ output = "Virtual-1", mode = "2560x1440", position = "auto", scale = "auto" })' "$fixture/hyprctl.log" 2>/dev/null; then

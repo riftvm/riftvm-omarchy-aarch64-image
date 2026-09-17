@@ -14,9 +14,9 @@ readonly POLL_INTERVAL="${OMARCHY_RIFTVM_POLL_INTERVAL:-1}"
 readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 readonly SHELL_IPC="${OMARCHY_RIFTVM_SHELL_IPC:-omarchy-shell}"
 readonly SHELL_IPC_TIMEOUT="${OMARCHY_RIFTVM_SHELL_IPC_TIMEOUT:-3}"
-# Number of polls to wait after the compositor confirms the new mode before
-# asking the shell to repaint.  Waiting keeps the repaint on a settled output
-# instead of racing the same transition it is meant to repair.
+# Polls to wait before repainting a confirmed mode change, counting the poll
+# that observes the compositor running the new mode.  Waiting keeps the repaint
+# on a settled output instead of racing the transition it is meant to repair.
 readonly REPAINT_TICKS="${OMARCHY_RIFTVM_REPAINT_TICKS:-2}"
 readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
 
@@ -148,6 +148,7 @@ repaint_background() {
 audit_ticks=10
 ticks_until_audit=0
 ticks_until_repaint=0
+repaint_pending=0
 previous=""
 watch_tick() {
   local current
@@ -163,8 +164,18 @@ watch_tick() {
   fi
   if (( ticks_until_audit == 0 )); then
     if reconcile_current_mode; then
+      # The compositor runs the preferred mode, so the periodic audit resumes.
+      # A mode request issued earlier is only repainted once it is confirmed:
+      # repainting while the compositor still switches outputs would race the
+      # transition the repaint exists to repair.
       ticks_until_audit=$audit_ticks
-      ticks_until_repaint=$REPAINT_TICKS
+      if (( repaint_pending )); then
+        repaint_pending=0
+        ticks_until_repaint=$REPAINT_TICKS
+      fi
+    else
+      # A mode request is pending; it retries on the next poll.
+      repaint_pending=1
     fi
   fi
   if (( ticks_until_repaint > 0 )); then
