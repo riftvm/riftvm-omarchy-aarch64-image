@@ -705,6 +705,10 @@ grep -Fq '/usr/local/libexec/omarchy-riftvm-display-watch' "$sddm_hyprland" ||
   fail "RiftVM SDDM greeter does not start dynamic virtio-gpu display reconciliation"
 grep -Fq 'mode = "preferred"' "$sddm_hyprland" ||
   fail "RiftVM SDDM greeter does not select the host-provided preferred mode"
+grep -Fq 'background themeTransition' "$display_watch" ||
+  fail "RiftVM display watcher does not force an Omarchy background repaint after a mode change"
+! grep -Fq 'background refresh' "$display_watch" ||
+  fail "RiftVM display watcher must not rely on the no-op Omarchy background refresh"
 
 (
   fixture=$(mktemp -d)
@@ -714,14 +718,45 @@ grep -Fq 'mode = "preferred"' "$sddm_hyprland" ||
   ln -s "$fixture/drivers/virtio_gpu" "$fixture/drm/card0/device/driver"
   printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
   printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
-  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >>"$OMARCHY_RIFTVM_HYPRCTL_LOG"\n' >"$fixture/hyprctl"
+  # Hyprland reports an applied mode back on the next monitor query. Mirror that
+  # here so the watcher can settle and the repaint assertion below can tell a
+  # single settled transition apart from a retry loop.
+  cat >"$fixture/hyprctl" <<'HYPRCTL'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_HYPRCTL_LOG"
+case "$1" in
+  -j)
+    [[ -s $OMARCHY_RIFTVM_HYPRCTL_STATE ]] && cat "$OMARCHY_RIFTVM_HYPRCTL_STATE"
+    ;;
+  eval)
+    mode=$(printf '%s\n' "$*" | sed -n 's/.*"\([0-9][0-9]*x[0-9][0-9]*\)".*/\1/p' | head -n 1)
+    if [[ -n $mode ]]; then
+      printf '[{"name":"Virtual-1","width":%s,"height":%s}]\n' "${mode%x*}" "${mode#*x}" \
+        >"$OMARCHY_RIFTVM_HYPRCTL_STATE"
+    fi
+    ;;
+esac
+HYPRCTL
   chmod 755 "$fixture/hyprctl"
+  # Model the Omarchy session the watcher has to repair: a wallpaper link, the
+  # active theme payload, and the shell IPC entry point.
+  mkdir -p "$fixture/state/omarchy/current/theme"
+  printf 'wallpaper\n' >"$fixture/background.png"
+  ln -s "$fixture/background.png" "$fixture/state/omarchy/current/background"
+  printf 'foreground = "#ffffff"\n' >"$fixture/state/omarchy/current/theme/colors.toml"
+  printf '[font]\nbase-size = 12\n' >"$fixture/state/omarchy/current/theme/shell.toml"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >>"$OMARCHY_RIFTVM_SHELL_LOG"\n' >"$fixture/omarchy-shell"
+  chmod 755 "$fixture/omarchy-shell"
 
   OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm" \
     OMARCHY_RIFTVM_HYPRCTL="$fixture/hyprctl" \
     OMARCHY_RIFTVM_HYPRCTL_LOG="$fixture/hyprctl.log" \
+    OMARCHY_RIFTVM_HYPRCTL_STATE="$fixture/hyprctl.state" \
+    OMARCHY_RIFTVM_SHELL_IPC="$fixture/omarchy-shell" \
+    OMARCHY_RIFTVM_SHELL_LOG="$fixture/shell.log" \
     OMARCHY_RIFTVM_LOG="$fixture/display-watch.log" \
     OMARCHY_RIFTVM_POLL_INTERVAL=0.05 \
+    XDG_STATE_HOME="$fixture/state" \
     XDG_RUNTIME_DIR="$fixture" \
     "$display_watch" &
   watcher_pid=$!
@@ -740,6 +775,24 @@ grep -Fq 'mode = "preferred"' "$sddm_hyprland" ||
       fail "RiftVM display watcher did not apply the new DRM preferred mode to Hyprland"; }
   ! grep -Fxq reload "$fixture/hyprctl.log" ||
     fail "RiftVM display watcher raced exact mode reconciliation with a Hyprland reload"
+  for _ in {1..40}; do
+    [[ -s $fixture/shell.log ]] && break
+    sleep 0.05
+  done
+  [[ -s $fixture/shell.log ]] ||
+    fail "RiftVM display watcher did not repaint the Omarchy background after a mode change"
+  expected_repaint="background themeTransition  $fixture/background.png $fixture/background.png"
+  expected_repaint+=" $(base64 -w 0 "$fixture/state/omarchy/current/theme/colors.toml")"
+  expected_repaint+=" $(base64 -w 0 "$fixture/state/omarchy/current/theme/shell.toml")"
+  grep -Fxq "$expected_repaint" "$fixture/shell.log" ||
+    { sed -n '1,20p' "$fixture/shell.log" >&2
+      fail "RiftVM display watcher repainted the background with the wrong payload"; }
+  # A settled mode change must produce exactly one repaint: repeating it on idle
+  # polls would flicker the wallpaper on every audit.
+  sleep 0.3
+  [[ $(wc -l <"$fixture/shell.log") -eq 1 ]] ||
+    { sed -n '1,20p' "$fixture/shell.log" >&2
+      fail "RiftVM display watcher repainted the background more than once for a settled mode change"; }
   kill "$watcher_pid" 2>/dev/null || true
   wait "$watcher_pid" 2>/dev/null || true
   watcher_pid=
@@ -753,11 +806,16 @@ grep -Fq 'mode = "preferred"' "$sddm_hyprland" ||
   ln -s "$fixture/drivers/virtio-pci" "$fixture/drm/card0/device/driver"
   ln -s "$fixture/modules/virtio_gpu" "$fixture/drivers/virtio-pci/module"
   : >"$fixture/hyprctl.log"
+  rm -f "$fixture/hyprctl.state"
   OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm" \
     OMARCHY_RIFTVM_HYPRCTL="$fixture/hyprctl" \
     OMARCHY_RIFTVM_HYPRCTL_LOG="$fixture/hyprctl.log" \
+    OMARCHY_RIFTVM_HYPRCTL_STATE="$fixture/hyprctl.state" \
+    OMARCHY_RIFTVM_SHELL_IPC="$fixture/omarchy-shell" \
+    OMARCHY_RIFTVM_SHELL_LOG="$fixture/shell.log" \
     OMARCHY_RIFTVM_LOG="$fixture/display-watch.log" \
     OMARCHY_RIFTVM_POLL_INTERVAL=0.05 \
+    XDG_STATE_HOME="$fixture/state" \
     XDG_RUNTIME_DIR="$fixture" \
     "$display_watch" &
   watcher_pid=$!

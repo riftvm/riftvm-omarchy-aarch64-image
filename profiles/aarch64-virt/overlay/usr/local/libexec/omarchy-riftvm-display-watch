@@ -11,7 +11,14 @@ readonly INSTANCE_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-riftvm-display-watch.in
 readonly DRM_ROOT="${OMARCHY_RIFTVM_DRM_ROOT:-/sys/class/drm}"
 readonly HYPRCTL="${OMARCHY_RIFTVM_HYPRCTL:-hyprctl}"
 readonly POLL_INTERVAL="${OMARCHY_RIFTVM_POLL_INTERVAL:-1}"
-readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-riftvm-display-watch.log}"
+readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+readonly SHELL_IPC="${OMARCHY_RIFTVM_SHELL_IPC:-omarchy-shell}"
+readonly SHELL_IPC_TIMEOUT="${OMARCHY_RIFTVM_SHELL_IPC_TIMEOUT:-3}"
+# Number of polls to wait after the compositor confirms the new mode before
+# asking the shell to repaint.  Waiting keeps the repaint on a settled output
+# instead of racing the same transition it is meant to repair.
+readonly REPAINT_TICKS="${OMARCHY_RIFTVM_REPAINT_TICKS:-2}"
+readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
 
 log_debug() {
   # Keep the volatile per-session file for quick local inspection, but also
@@ -105,11 +112,42 @@ reconcile_current_mode() {
   return "$pending"
 }
 
+# A virtio-gpu mode change recreates the compositor's output surfaces, and
+# Omarchy's background layer can come back without its committed buffer.  The
+# wallpaper is static, so nothing redraws it on its own: the desktop stays
+# bare until an unrelated window resize forces a repaint.  Omarchy's own
+# background-repair IPC cannot fix that, because it deliberately does nothing
+# while the wallpaper path is unchanged.  Push the current theme through the
+# one IPC entry point that forces a redraw; passing the theme that is already
+# active keeps the desktop appearance identical.
+repaint_background() {
+  local background theme colors_payload shell_payload output
+  if [[ -z ${OMARCHY_RIFTVM_SHELL_IPC:-} ]] && ! command -v "$SHELL_IPC" >/dev/null 2>&1; then
+    log_debug "omarchy-shell is unavailable; skipping background repaint"
+    return 0
+  fi
+  background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
+  if [[ ! -f $background ]]; then
+    log_debug "no Omarchy background is configured; skipping repaint"
+    return 0
+  fi
+  theme="$STATE_HOME/omarchy/current/theme"
+  colors_payload=$(base64 -w 0 "$theme/colors.toml" 2>/dev/null || true)
+  shell_payload=$(base64 -w 0 "$theme/shell.toml" 2>/dev/null || true)
+  if output=$(timeout "$SHELL_IPC_TIMEOUT" "$SHELL_IPC" background themeTransition "" \
+    "$background" "$background" "$colors_payload" "$shell_payload" 2>&1); then
+    log_debug "repainted Omarchy background after a display mode change: ${output:-ok}"
+  else
+    log_debug "Omarchy background repaint failed: ${output:-no output}"
+  fi
+}
+
 # Keep cheap DRM polling responsive, but avoid compositor IPC on every idle tick.
 # Retry unconfirmed mode requests on the next tick. A periodic audit also repairs
 # compositor reloads/restarts that do not change the DRM signature.
 audit_ticks=10
 ticks_until_audit=0
+ticks_until_repaint=0
 previous=""
 watch_tick() {
   local current
@@ -126,7 +164,12 @@ watch_tick() {
   if (( ticks_until_audit == 0 )); then
     if reconcile_current_mode; then
       ticks_until_audit=$audit_ticks
+      ticks_until_repaint=$REPAINT_TICKS
     fi
+  fi
+  if (( ticks_until_repaint > 0 )); then
+    ticks_until_repaint=$((ticks_until_repaint - 1))
+    (( ticks_until_repaint > 0 )) || repaint_background
   fi
 }
 

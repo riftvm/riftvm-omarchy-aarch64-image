@@ -30,6 +30,29 @@ compositor reload recovery in a disposable Guest. Existing installations need a
 new paired integration package; changing the Host app alone does not install
 this watcher. Overlay changes require a full image rebuild.
 
+## Background repaint after a mode change
+
+A virtio-gpu mode change replaces the compositor's output surfaces, and
+Omarchy's background layer can come back without its committed buffer. The
+wallpaper is static, so nothing redraws it by itself: the desktop keeps the bar
+and the dock but stays bare until an unrelated window resize forces a repaint.
+Omarchy cannot repair this either, because its background-repair IPC
+deliberately does nothing while the wallpaper path is unchanged.
+
+After the compositor confirms a new mode, the watcher waits one more poll and
+then pushes the active theme through the one IPC entry point that forces a
+redraw (`background themeTransition` with the current background and theme
+payloads). Re-applying the theme that is already active keeps the desktop
+appearance identical while the layer commits a fresh buffer. The repaint is
+issued once per settled mode change, not on the periodic audit, so a stable
+session never flickers. `OMARCHY_RIFTVM_REPAINT_TICKS` adjusts the delay and
+`OMARCHY_RIFTVM_SHELL_IPC` overrides the shell command.
+
+`tests/run` covers this with a fake shell IPC and a stateful fake Hyprland: it
+asserts the exact repaint payload, exactly one repaint for a settled mode
+change, and no repaint while the mode is unchanged. Live first-boot
+qualification in a disposable Guest is still pending.
+
 ## Remaining performance work assessment
 
 | Work | Feasibility and next evidence |
