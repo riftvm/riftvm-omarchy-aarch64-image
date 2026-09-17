@@ -29,11 +29,11 @@ jobs:
         run: |
           set -euo pipefail
           tag=probe-upload-${{ github.run_id }}
-          gh release create "$tag" --draft --title "Upload probe" --notes "Temporary probe; the run deletes it."
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --title "Upload probe" --notes "Temporary probe; the run deletes it."
           start=$(date +%s)
-          if timeout 300 gh release upload "$tag" payload.bin; then
+          if timeout 300 gh release upload "$tag" --repo "$GITHUB_REPOSITORY" payload.bin; then
             echo "PROBE-RESULT release-asset: $(( $(date +%s) - start ))s for 128 MiB"
           else
             echo "PROBE-RESULT release-asset: TIMEOUT after $(( $(date +%s) - start ))s for 128 MiB"
           fi
-          gh release delete "$tag" --yes --cleanup-tag || true
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
