@@ -68,10 +68,12 @@ fi
 
 echo 'PASS: the wallpaper check separates a flat desktop from a painted one'
 
+
 # The repair has to pick the cause: no wallpaper at all is a theme that was never
 # seeded, while a set wallpaper on a flat screen is a layer that lost its buffer.
 mv "$fixture/bin/grim.disabled" "$fixture/bin/grim"
 export OMARCHY_RIFTVM_TEST_CAPTURE="$fixture/flat.ppm"
+export OMARCHY_RIFTVM_BACKGROUND_REPAIR=1
 sleep() { :; }
 cat >"$fixture/bin/omarchy-theme-set" <<'THEMESET'
 #!/bin/bash
@@ -168,3 +170,16 @@ grep -Fq 'hl.dsp.exec_cmd("omarchy-launch-shell")' "$OMARCHY_RIFTVM_TEST_THEMESE
 
 echo 'PASS: the wallpaper repair seeds a theme or rebuilds the layer, never killing the shell'
 echo 'PASS: a dead shell is relaunched through the compositor'
+
+# With the repair off, a flat desktop is reported and nothing else happens.
+(
+  OMARCHY_RIFTVM_BACKGROUND_REPAIR=0
+  : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+  verify_and_repair_background
+)
+[[ ! -s $OMARCHY_RIFTVM_TEST_THEMESET_LOG ]] || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: the background repair acted while it was off" >&2
+  exit 1
+}
+echo 'PASS: the background repair is opt-in and leaves the session alone by default'

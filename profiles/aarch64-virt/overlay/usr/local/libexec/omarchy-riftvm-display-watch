@@ -297,6 +297,14 @@ verify_and_repair_background() {
     flat=$((flat + 1))
     ((attempt == 1)) && sleep 1.5 8>&-
   done
+  # Detection is cheap and always useful; acting on it is not. Reloading the
+  # shell's plugins or restarting the shell has left the reporter's session with
+  # no bar, so nothing here touches the session unless a caller asks for it.
+  if [[ ${OMARCHY_RIFTVM_BACKGROUND_REPAIR:-0} != 1 ]]; then
+    log_debug "Omarchy background is flat; automatic repair is off (OMARCHY_RIFTVM_BACKGROUND_REPAIR=1 enables it)"
+    rm -f "$capture"
+    return 0
+  fi
   log_debug "Omarchy background is flat in $flat captures; repairing"
   background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
   discover_hyprland_instance || true
