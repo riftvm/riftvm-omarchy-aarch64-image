@@ -53,6 +53,33 @@ asserts the exact repaint payload, exactly one repaint for a settled mode
 change, and no repaint while the mode is unchanged. Live first-boot
 qualification in a disposable Guest is still pending.
 
+## Holding the mode while the host alternates
+
+A host that is still laying out its window publishes a size and replaces it a
+moment later. Every offer the guest acts on makes Hyprland destroy and rebuild
+all of its outputs, which the user sees as the desktop flashing, and the
+background layer loses its committed buffer in the process. Two guards keep the
+guest out of that:
+
+- After the DRM mode list changes, the watcher waits `OMARCHY_RIFTVM_SETTLE_TICKS`
+  polls (default 2) with the list unchanged before it touches the compositor, so a
+  size that is already being replaced never reaches DRM.
+- The watcher counts the mode switches it has made inside
+  `OMARCHY_RIFTVM_MODE_SWITCH_WINDOW` seconds (default 30). Once it reaches
+  `OMARCHY_RIFTVM_MODE_SWITCH_LIMIT` (default 4) it holds the mode the compositor
+  already has, logs `holding <output> at <mode>`, and lets the periodic audit try
+  again later. An alternating host therefore costs a few switches instead of an
+  endless stream.
+
+The background repaint is part of the same budget: it re-runs a short reveal, so
+`OMARCHY_RIFTVM_REPAINT_MIN_INTERVAL` (default 5 seconds) keeps a burst of mode
+changes from turning into a burst of repaints.
+
+`tests/run` covers the settle, the repaint payload, exactly one repaint for a
+settled change, and the hold: with a compositor that never accepts a request, an
+alternating host produces at most `MODE_SWITCH_LIMIT` switches and one
+`holding` line.
+
 ## Remaining performance work assessment
 
 | Work | Feasibility and next evidence |

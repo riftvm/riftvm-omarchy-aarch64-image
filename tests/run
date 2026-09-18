@@ -835,6 +835,58 @@ HYPRCTL
   wait "$watcher_pid" 2>/dev/null || true
   watcher_pid=
 )
+
+# A host that alternates two sizes must not make the guest rebuild its outputs
+# for every offer: that is the flash the user sees. The watcher settles first and
+# then holds the mode once it has switched too often inside the window.
+(
+  fixture=$(mktemp -d)
+  watcher_pid=
+  trap '[[ -z $watcher_pid ]] || kill "$watcher_pid" 2>/dev/null || true; rm -rf "$fixture"' EXIT
+  mkdir -p "$fixture/drm/card0/device" "$fixture/drivers/virtio_gpu" "$fixture/drm/card0-Virtual-1"
+  ln -s "$fixture/drivers/virtio_gpu" "$fixture/drm/card0/device/driver"
+  printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
+  printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+  # This compositor never accepts a request, so every reconcile is a mismatch.
+  cat >"$fixture/hyprctl" <<'HYPRCTL'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_HYPRCTL_LOG"
+if [[ $1 == -j ]]; then
+  printf '[{"name":"Virtual-1","width":1280,"height":720}]\n'
+fi
+HYPRCTL
+  chmod 755 "$fixture/hyprctl"
+
+  OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm" \
+    OMARCHY_RIFTVM_HYPRCTL="$fixture/hyprctl" \
+    OMARCHY_RIFTVM_HYPRCTL_LOG="$fixture/hyprctl.log" \
+    OMARCHY_RIFTVM_LOG="$fixture/display-watch.log" \
+    OMARCHY_RIFTVM_POLL_INTERVAL=0.05 \
+    OMARCHY_RIFTVM_SETTLE_TICKS=1 \
+    OMARCHY_RIFTVM_MODE_SWITCH_LIMIT=3 \
+    XDG_RUNTIME_DIR="$fixture" \
+    "$display_watch" &
+  watcher_pid=$!
+  sleep 0.1
+  : >"$fixture/hyprctl.log"
+  for _ in {1..12}; do
+    printf '2560x1440\n1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+    sleep 0.12
+    printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"
+    sleep 0.12
+  done
+  switches=$(grep -c '^eval' "$fixture/hyprctl.log" 2>/dev/null || true)
+  (( switches <= 3 )) || {
+    sed -n '1,40p' "$fixture/display-watch.log" >&2
+    fail "RiftVM display watcher switched modes $switches times while the host alternated sizes"
+  }
+  grep -Fq 'holding Virtual-1' "$fixture/display-watch.log" ||
+    fail "RiftVM display watcher did not hold the mode once the host alternated sizes"
+  kill "$watcher_pid" 2>/dev/null || true
+  wait "$watcher_pid" 2>/dev/null || true
+  watcher_pid=
+)
+pass "RiftVM display watcher holds the mode when the host alternates sizes"
 pass "RiftVM display watcher reacts to virtio-gpu mode changes"
 bash "$ROOT/tests/test-frame-scheduling"
 

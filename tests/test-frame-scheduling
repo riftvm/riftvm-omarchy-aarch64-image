@@ -5,6 +5,9 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 export OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm"
 export OMARCHY_RIFTVM_HYPRCTL=hyprctl
+# This file asserts the exact poll-by-poll IPC schedule, so it turns the settle
+# window off; tests/run covers the settle and the mode-switch breaker.
+export OMARCHY_RIFTVM_SETTLE_TICKS=0
 mkdir -p "$fixture/drm/card0-Virtual-1"
 printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
 printf '1280x720\n' >"$fixture/drm/card0-Virtual-1/modes"

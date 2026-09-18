@@ -18,7 +18,24 @@ readonly SHELL_IPC_TIMEOUT="${OMARCHY_RIFTVM_SHELL_IPC_TIMEOUT:-3}"
 # that observes the compositor running the new mode.  Waiting keeps the repaint
 # on a settled output instead of racing the transition it is meant to repair.
 readonly REPAINT_TICKS="${OMARCHY_RIFTVM_REPAINT_TICKS:-2}"
+# A host that is still laying out its window publishes a size and replaces it
+# again a moment later.  Acting on the first offer makes the compositor rebuild
+# every output for a size that is already gone, which is the flash the user sees,
+# so wait for the DRM list to stay put.
+readonly SETTLE_TICKS="${OMARCHY_RIFTVM_SETTLE_TICKS:-2}"
+# Circuit breaker: a host that alternates two sizes must not keep the guest
+# rebuilding outputs.  After this many switches inside the window the watcher
+# holds the mode it has and lets the next audit try again.
+readonly MODE_SWITCH_LIMIT="${OMARCHY_RIFTVM_MODE_SWITCH_LIMIT:-4}"
+readonly MODE_SWITCH_WINDOW="${OMARCHY_RIFTVM_MODE_SWITCH_WINDOW:-30}"
+# The background repaint re-runs a short reveal; repeating it during a burst of
+# mode changes reads as flicker, so never repaint twice in this window.
+readonly REPAINT_MIN_INTERVAL="${OMARCHY_RIFTVM_REPAINT_MIN_INTERVAL:-5}"
 readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
+
+now_seconds() {
+  printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}"
+}
 
 log_debug() {
   # Keep the volatile per-session file for quick local inspection, but also
@@ -80,6 +97,8 @@ mode_signature() {
 # forcing continuous rendering here masks regressions and prevents idle sleep.
 reconcile_current_mode() {
   local connector connector_name preferred current pending=0
+  local now
+  now=$(now_seconds)
   discover_hyprland_instance || return 1
   for connector in "$DRM_ROOT"/card*-*; do
     [[ -f $connector/status && $(<"$connector/status") == connected ]] || continue
@@ -93,6 +112,20 @@ reconcile_current_mode() {
       '.[] | select(.name == $name) | "\(.width)x\(.height)"' 2>/dev/null | head -n 1)
     [[ $current == "$preferred" ]] && continue
 
+    # Hold the mode once the guest has switched too often inside the window:
+    # the host is alternating sizes and every switch rebuilds every output.
+    local stamp
+    local -a recent_switches=()
+    for stamp in "${mode_switch_times[@]}"; do
+      (( now - stamp < MODE_SWITCH_WINDOW )) && recent_switches+=("$stamp")
+    done
+    mode_switch_times=("${recent_switches[@]}")
+    if (( ${#mode_switch_times[@]} >= MODE_SWITCH_LIMIT )); then
+      log_debug "holding $connector_name at ${current:-unknown}: ${#mode_switch_times[@]} mode switches within ${MODE_SWITCH_WINDOW}s"
+      pending=0
+      continue
+    fi
+
     # Reloading a `preferred` monitor rule is not sufficient on every Hyprland
     # release: after a virtio-gpu hotplug it can retain the old current mode
     # even though the new preferred mode is already first in DRM sysfs. Apply
@@ -104,6 +137,7 @@ reconcile_current_mode() {
     pending=1
     if output=$("$HYPRCTL" eval \
       "hl.monitor({ output = \"$connector_name\", mode = \"$preferred\", position = \"auto\", scale = \"auto\" })" 2>&1); then
+      mode_switch_times+=("$now")
       log_debug "requested $connector_name mode $preferred (was ${current:-unknown}): $output"
     else
       log_debug "failed to apply $connector_name mode $preferred (was ${current:-unknown}): $output"
@@ -121,9 +155,14 @@ reconcile_current_mode() {
 # one IPC entry point that forces a redraw; passing the theme that is already
 # active keeps the desktop appearance identical.
 repaint_background() {
-  local background theme colors_payload shell_payload output
+  local background theme colors_payload shell_payload output now
   if [[ -z ${OMARCHY_RIFTVM_SHELL_IPC:-} ]] && ! command -v "$SHELL_IPC" >/dev/null 2>&1; then
     log_debug "omarchy-shell is unavailable; skipping background repaint"
+    return 0
+  fi
+  now=$(now_seconds)
+  if (( last_repaint_at > 0 && now - last_repaint_at < REPAINT_MIN_INTERVAL )); then
+    log_debug "skipping background repaint: one ran $((now - last_repaint_at))s ago"
     return 0
   fi
   background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
@@ -134,6 +173,7 @@ repaint_background() {
   theme="$STATE_HOME/omarchy/current/theme"
   colors_payload=$(base64 -w 0 "$theme/colors.toml" 2>/dev/null || true)
   shell_payload=$(base64 -w 0 "$theme/shell.toml" 2>/dev/null || true)
+  last_repaint_at=$now
   if output=$(timeout "$SHELL_IPC_TIMEOUT" "$SHELL_IPC" background themeTransition "" \
     "$background" "$background" "$colors_payload" "$shell_payload" 2>&1); then
     log_debug "repainted Omarchy background after a display mode change: ${output:-ok}"
@@ -149,6 +189,9 @@ audit_ticks=10
 ticks_until_audit=0
 ticks_until_repaint=0
 repaint_pending=0
+settle_ticks=0
+last_repaint_at=0
+mode_switch_times=()
 previous=""
 watch_tick() {
   local current
@@ -157,7 +200,14 @@ watch_tick() {
     log_debug "DRM signature changed: $current"
     previous=$current
     ticks_until_audit=0
+    settle_ticks=$SETTLE_TICKS
     sleep 0.2
+  fi
+  if (( settle_ticks > 0 )); then
+    # The host is still publishing. Acting now buys a compositor rebuild for a
+    # size the host is about to replace.
+    settle_ticks=$((settle_ticks - 1))
+    return
   fi
   if (( ticks_until_audit > 0 )); then
     ticks_until_audit=$((ticks_until_audit - 1))
