@@ -31,10 +31,9 @@ readonly MODE_SWITCH_WINDOW="${OMARCHY_RIFTVM_MODE_SWITCH_WINDOW:-30}"
 # The background repaint re-runs a short reveal; repeating it during a burst of
 # mode changes reads as flicker, so never repaint twice in this window.
 readonly REPAINT_MIN_INTERVAL="${OMARCHY_RIFTVM_REPAINT_MIN_INTERVAL:-5}"
-# `omarchy-theme-set` regenerates templates and restarts terminals, and the shell
-# restart replaces every panel; both need longer than a shell IPC round trip.
+# `omarchy-theme-set` regenerates templates and restarts terminals, so it needs
+# longer than a shell IPC round trip.
 readonly THEME_SET_TIMEOUT="${OMARCHY_RIFTVM_THEME_SET_TIMEOUT:-60}"
-readonly SHELL_RESTART_TIMEOUT="${OMARCHY_RIFTVM_SHELL_RESTART_TIMEOUT:-30}"
 readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
 
 now_seconds() {
@@ -173,6 +172,11 @@ reconcile_current_mode() {
 # while the wallpaper path is unchanged.  Push the current theme through the
 # one IPC entry point that forces a redraw; passing the theme that is already
 # active keeps the desktop appearance identical.
+shell_ipc() {
+  [[ -z ${OMARCHY_RIFTVM_SHELL_IPC:-} ]] && ! command -v "$SHELL_IPC" >/dev/null 2>&1 && return 1
+  timeout "$SHELL_IPC_TIMEOUT" "$SHELL_IPC" "$@" 8>&- >/dev/null 2>&1
+}
+
 repaint_background() {
   local background theme colors_payload shell_payload output now
   if [[ -z ${OMARCHY_RIFTVM_SHELL_IPC:-} ]] && ! command -v "$SHELL_IPC" >/dev/null 2>&1; then
@@ -312,13 +316,34 @@ verify_and_repair_background() {
         log_debug "omarchy-theme-set '$theme_name' failed"
     fi
   else
-    log_debug "wallpaper $background is set but the desktop is flat; restarting omarchy-shell"
-    if command -v omarchy-restart-shell >/dev/null 2>&1; then
-      timeout "$SHELL_RESTART_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 8>&- ||
-        log_debug "omarchy-restart-shell failed"
+    # The wallpaper is set but the layer is not painting it. Rebuild the layer
+    # from the least invasive end, checking after each step, and never kill a
+    # live shell: a shell that is killed on a host where the relaunch does not
+    # take leaves the session with no bar and no way back but a reboot.
+    log_debug "wallpaper $background is set but the desktop is flat; rebuilding the layer"
+    if shell_ipc shell rescanPlugins; then
+      log_debug "asked the shell to rescan its plugins"
+    else
+      log_debug "the shell did not accept rescanPlugins"
+    fi
+    sleep 1.5 8>&-
+    if background_needs_repair "$capture"; then
+      log_debug "still flat after rescanPlugins; asking the compositor to reload"
+      "$HYPRCTL" dispatch forcerendererreload >/dev/null 2>&1 || true
+      sleep 1.5 8>&-
+    fi
+    if background_needs_repair "$capture"; then
+      # Only when the shell is gone is a relaunch the answer, and it goes through
+      # the compositor so the new instance inherits the session environment.
+      if ! shell_ipc shell ping; then
+        log_debug "the shell is not answering; relaunching it through the compositor"
+        "$HYPRCTL" dispatch 'hl.dsp.exec_cmd("omarchy-launch-shell")' >/dev/null 2>&1 || true
+      else
+        log_debug "the shell is alive and still not painting; leaving it running"
+      fi
+      sleep 3 8>&-
     fi
   fi
-  sleep 2 8>&-
   if background_needs_repair "$capture"; then
     log_debug "Omarchy background is still not painted after the repair"
   else

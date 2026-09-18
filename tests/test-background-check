@@ -109,14 +109,62 @@ grep -Fxq 'tokyo-night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
     exit 1
   }
 
-# A wallpaper that is set but not painted escalates to the shell restart.
+# A wallpaper that is set but not painted rebuilds the layer from the least
+# invasive end, and never kills a live shell: a shell that is killed on a host
+# where the relaunch does not take leaves the session with no bar.
+cat >"$fixture/bin/omarchy-shell" <<'SHELLIPC'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+exit 0
+SHELLIPC
+cat >"$fixture/bin/hyprctl" <<'HYPRCTL'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+HYPRCTL
+chmod 755 "$fixture/bin/omarchy-shell" "$fixture/bin/hyprctl"
+export OMARCHY_RIFTVM_SHELL_IPC="$fixture/bin/omarchy-shell"
+
 : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
 printf 'wallpaper\n' >"$fixture/wallpaper.png"
 ln -sfn "$fixture/wallpaper.png" "$fixture/state/omarchy/current/background"
 verify_and_repair_background
-grep -q 'restart-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
-  echo "FAIL: a set but unpainted wallpaper did not restart the shell" >&2
+grep -Fxq 'shell rescanPlugins' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: a set but unpainted wallpaper did not ask the shell to rebuild its plugins" >&2
   exit 1
 }
+grep -Fxq 'dispatch forcerendererreload' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  echo "FAIL: a set but unpainted wallpaper did not ask the compositor to reload" >&2
+  exit 1
+}
+! grep -q 'restart-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
+  {
+    echo "FAIL: the repair restarted the shell instead of rebuilding the layer" >&2
+    exit 1
+  }
 
-echo 'PASS: the wallpaper repair picks the theme or the shell restart from the cause'
+# A shell that is not answering at all is the one case where a relaunch is the
+# answer, and it goes through the compositor so the new instance inherits the
+# session environment.
+cat >"$fixture/bin/omarchy-shell" <<'DEADSHELL'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+[[ $1 == shell && $2 == ping ]] && exit 1
+exit 0
+DEADSHELL
+chmod 755 "$fixture/bin/omarchy-shell"
+: >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+verify_and_repair_background
+grep -Fq 'hl.dsp.exec_cmd("omarchy-launch-shell")' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: a dead shell was not relaunched through the compositor" >&2
+  exit 1
+}
+! grep -q 'restart-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
+  {
+    echo "FAIL: a dead shell was restarted by killing it instead of relaunching" >&2
+    exit 1
+  }
+
+echo 'PASS: the wallpaper repair seeds a theme or rebuilds the layer, never killing the shell'
+echo 'PASS: a dead shell is relaunched through the compositor'
