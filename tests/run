@@ -802,10 +802,15 @@ HYPRCTL
   kill "$watcher_pid" 2>/dev/null || true
   wait "$watcher_pid" 2>/dev/null || true
   watcher_pid=
-  # The watcher may be inside its short external `sleep` when terminated. That
-  # child briefly inherits the flock descriptor, so wait for one poll interval
-  # before asserting that a replacement instance can acquire the lock.
-  sleep 0.1
+  # The watcher may be inside an external command when it is terminated. Long
+  # children no longer inherit the lock descriptor, but wait for the lock itself
+  # instead of guessing an interval, so a replacement instance is only ever
+  # rejected when the contract is genuinely broken.
+  instance_lock="$fixture/omarchy-riftvm-display-watch.instance.lock"
+  for _ in {1..80}; do
+    flock -n "$instance_lock" true 2>/dev/null && break
+    sleep 0.05
+  done
 
   rm "$fixture/drm/card0/device/driver"
   mkdir -p "$fixture/drivers/virtio-pci" "$fixture/modules/virtio_gpu"

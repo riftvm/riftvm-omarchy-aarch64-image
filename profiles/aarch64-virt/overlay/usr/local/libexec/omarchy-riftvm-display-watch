@@ -190,7 +190,7 @@ repaint_background() {
   shell_payload=$(base64 -w 0 "$theme/shell.toml" 2>/dev/null || true)
   last_repaint_at=$now
   if output=$(timeout "$SHELL_IPC_TIMEOUT" "$SHELL_IPC" background themeTransition "" \
-    "$background" "$background" "$colors_payload" "$shell_payload" 2>&1); then
+    "$background" "$background" "$colors_payload" "$shell_payload" 2>&1 8>&-); then
     log_debug "repainted Omarchy background after a display mode change: ${output:-ok}"
   else
     log_debug "Omarchy background repaint failed: ${output:-no output}"
@@ -210,7 +210,7 @@ background_needs_repair() {
     log_debug "background check skipped: no capture tool or session display"
     return 1
   fi
-  grim -o "${OMARCHY_RIFTVM_BACKGROUND_OUTPUT:-Virtual-1}" -t ppm "$capture" 2>/dev/null || {
+  grim -o "${OMARCHY_RIFTVM_BACKGROUND_OUTPUT:-Virtual-1}" -t ppm "$capture" 8>&- 2>/dev/null || {
     log_debug "background check skipped: the capture failed"
     return 1
   }
@@ -275,7 +275,7 @@ PY
 verify_and_repair_background() {
   local capture background theme_name
   # The repaint above runs a short reveal; give it a moment before looking.
-  sleep 0.6
+  sleep 0.6 8>&-
   capture=$(mktemp "${TMPDIR:-/tmp}/riftvm-background.XXXXXX.ppm")
   if ! background_needs_repair "$capture"; then
     log_debug "Omarchy background is painted; no repair needed"
@@ -288,17 +288,17 @@ verify_and_repair_background() {
     theme_name=$(basename "$(readlink -f "$STATE_HOME/omarchy/current/theme" 2>/dev/null || true)")
     log_debug "no wallpaper at $STATE_HOME/omarchy/current/background; re-applying theme ${theme_name:-unknown}"
     if [[ -n $theme_name ]] && command -v omarchy-theme-set >/dev/null 2>&1; then
-      timeout "$SHELL_IPC_TIMEOUT" omarchy-theme-set "$theme_name" >/dev/null 2>&1 ||
+      timeout "$SHELL_IPC_TIMEOUT" omarchy-theme-set "$theme_name" >/dev/null 2>&1 8>&- ||
         log_debug "omarchy-theme-set $theme_name failed"
     fi
   else
     log_debug "wallpaper $background is set but the desktop is flat; restarting omarchy-shell"
     if command -v omarchy-restart-shell >/dev/null 2>&1; then
-      timeout "$SHELL_IPC_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 ||
+      timeout "$SHELL_IPC_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 8>&- ||
         log_debug "omarchy-restart-shell failed"
     fi
   fi
-  sleep 2
+  sleep 2 8>&-
   if background_needs_repair "$capture"; then
     log_debug "Omarchy background is still not painted after the repair"
   else
