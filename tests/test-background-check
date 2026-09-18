@@ -1,0 +1,69 @@
+#!/bin/bash
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+export OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm"
+export OMARCHY_RIFTVM_HYPRCTL=hyprctl
+export XDG_STATE_HOME="$fixture/state"
+# The check finds the session socket itself; the test only has to look like a
+# session that has one.
+export WAYLAND_DISPLAY=wayland-1
+export XDG_RUNTIME_DIR="$fixture"
+mkdir -p "$fixture/state/omarchy/current/theme" "$fixture/bin"
+printf 'background = "#1b1f27"\n' >"$fixture/state/omarchy/current/theme/colors.toml"
+python3 - "$fixture" <<'PY'
+import pathlib, sys
+fixture = pathlib.Path(sys.argv[1])
+
+def ppm(path, pixels, size=120):
+    header = f"P6\n{size} {size}\n255\n".encode()
+    body = bytearray()
+    for y in range(size):
+        for x in range(size):
+            body += bytes(pixels(x, y))
+    path.write_bytes(header + bytes(body))
+
+# Omarchy's theme background: what the desktop looks like without a wallpaper.
+ppm(fixture / "flat.ppm", lambda x, y: (0x1b, 0x1f, 0x27))
+# An image with structure: what a wallpaper looks like.
+ppm(fixture / "wallpaper.ppm", lambda x, y: ((x * 2) % 256, (y * 2) % 256, (x + y) % 256))
+PY
+cat >"$fixture/bin/grim" <<'GRIM'
+#!/bin/bash
+# `grim -o OUTPUT -t ppm FILE`
+target=${@: -1}
+cp "$OMARCHY_RIFTVM_TEST_CAPTURE" "$target"
+GRIM
+chmod 755 "$fixture/bin/grim"
+export PATH="$fixture/bin:$PATH"
+
+source <(sed '/^install -d -m 0700/,$d' "$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/omarchy-riftvm-display-watch")
+log_debug() { :; }
+
+export OMARCHY_RIFTVM_TEST_CAPTURE="$fixture/flat.ppm"
+if ! background_needs_repair "$fixture/out.ppm"; then
+  echo "FAIL: a flat theme-coloured desktop was reported as painted" >&2
+  exit 1
+fi
+
+export OMARCHY_RIFTVM_TEST_CAPTURE="$fixture/wallpaper.ppm"
+if background_needs_repair "$fixture/out.ppm"; then
+  echo "FAIL: a wallpaper was reported as a missing background" >&2
+  exit 1
+fi
+
+# No grim, or a capture that fails, must not be read as "the wallpaper is fine".
+OMARCHY_RIFTVM_BACKGROUND_CHECK=0
+if background_needs_repair "$fixture/out.ppm"; then
+  echo "FAIL: the background check ran while it was disabled" >&2
+  exit 1
+fi
+unset OMARCHY_RIFTVM_BACKGROUND_CHECK
+mv "$fixture/bin/grim" "$fixture/bin/grim.disabled"
+if background_needs_repair "$fixture/out.ppm"; then
+  echo "FAIL: a missing capture tool was reported as a missing background" >&2
+  exit 1
+fi
+
+echo 'PASS: the wallpaper check separates a flat desktop from a painted one'

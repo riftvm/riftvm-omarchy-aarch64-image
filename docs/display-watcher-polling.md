@@ -80,6 +80,32 @@ settled change, and the hold: with a compositor that never accepts a request, an
 alternating host produces at most `MODE_SWITCH_LIMIT` switches and one
 `holding` line.
 
+## Verifying and repairing the background
+
+The repaint above assumes the layer only needs a redraw. When the wallpaper is
+still missing, the watcher now looks instead of guessing: after a settled mode
+change it captures the output with `grim`, samples the middle of the screen (away
+from the bar and the dock), and treats a screen that is one flat colour — or that
+matches the active theme's `background` — as a missing wallpaper. The verdict is
+logged either way (`background check: colors=… themeMatch=… flat=…`), including
+when the check is skipped because there is no capture tool or session display.
+
+A broken result repairs the cause rather than the symptom:
+
+- the wallpaper link is missing or dangling → re-apply the active theme with
+  `omarchy-theme-set`, which recreates the link;
+- the wallpaper is set but the desktop is flat → restart the shell with
+  `omarchy-restart-shell`, which is upstream's documented recovery from a
+  background layer that lost its committed buffer.
+
+The check runs again two seconds later and logs whether the repair worked, so a
+report either way says what the screen looked like before and after.
+`OMARCHY_RIFTVM_BACKGROUND_CHECK=0` disables the capture and the escalation.
+
+`tests/test-background-check` drives the decision with generated PPM fixtures: a
+flat theme-coloured screen must be reported as missing, a structured image must
+not, and a disabled or unavailable check must never claim the wallpaper is fine.
+
 ## Remaining performance work assessment
 
 | Work | Feasibility and next evidence |

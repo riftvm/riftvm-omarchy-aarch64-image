@@ -61,6 +61,21 @@ discover_hyprland_instance() {
   return 1
 }
 
+# `grim` and Omarchy's own helpers need the session socket. The user service
+# inherits XDG_RUNTIME_DIR but not always the display name, and a capture that
+# silently fails would read as "the wallpaper is fine".
+discover_wayland_display() {
+  local socket
+  [[ -n ${WAYLAND_DISPLAY:-} ]] && return 0
+  for socket in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/wayland-*; do
+    [[ -S $socket ]] || continue
+    export WAYLAND_DISPLAY=${socket##*/}
+    log_debug "discovered Wayland display $WAYLAND_DISPLAY"
+    return 0
+  done
+  return 1
+}
+
 uses_virtio_gpu() {
   local device driver module
   # On a real virtio-pci device the DRM card's immediate driver link may name
@@ -182,6 +197,116 @@ repaint_background() {
   fi
 }
 
+# Whether the desktop is actually painting a wallpaper. The compositor draws
+# Omarchy's theme background as one flat colour when the background layer has no
+# committed buffer, so a capture that is uniform in that colour is the failure
+# the user sees; a real wallpaper is an image with many colours. Deciding from a
+# capture keeps the repair honest: the log says what the screen looked like
+# before and after, instead of assuming the layer was the problem.
+background_needs_repair() {
+  local capture=$1 theme_background verdict status
+  [[ ${OMARCHY_RIFTVM_BACKGROUND_CHECK:-1} == 1 ]] || return 1
+  if ! command -v grim >/dev/null 2>&1 || ! discover_wayland_display; then
+    log_debug "background check skipped: no capture tool or session display"
+    return 1
+  fi
+  grim -o "${OMARCHY_RIFTVM_BACKGROUND_OUTPUT:-Virtual-1}" -t ppm "$capture" 2>/dev/null || {
+    log_debug "background check skipped: the capture failed"
+    return 1
+  }
+  # `background = "#1b1f27"` from the active theme; portable across BSD and GNU
+  # tools, and empty when the theme colours are unreadable.
+  theme_background=$(awk -F'#' '
+    /^[[:space:]]*background[[:space:]]*=/ {
+      split($2, value, "\"")
+      if (value[1] ~ /^[0-9A-Fa-f]{6}$/) { print tolower(value[1]); exit }
+    }' "$STATE_HOME/omarchy/current/theme/colors.toml" 2>/dev/null)
+  verdict=$(python3 - "$capture" "$theme_background" <<'PY'
+import sys
+
+path, theme = sys.argv[1], (sys.argv[2] or "").lstrip("#").lower()
+with open(path, "rb") as stream:
+    data = stream.read()
+# P6 <width> <height> <max>\n<binary>
+tokens, index = [], 2
+while len(tokens) < 3:
+    if data[index:index + 1] == b"#":
+        index = data.index(b"\n", index) + 1
+        continue
+    if data[index:index + 1].isspace():
+        index += 1
+        continue
+    end = index
+    while not data[end:end + 1].isspace():
+        end += 1
+    tokens.append(int(data[index:end]))
+    index = end + 1
+width, height = tokens[0], tokens[1]
+pixels = data[index:]
+stride = max(1, min(width, height) // 48)
+
+# Stay away from the bar and the dock: the wallpaper lives in the middle.
+colors = set()
+matching = total = 0
+for y in range(height // 4, height * 3 // 4, stride):
+    for x in range(width // 3, width * 2 // 3, stride):
+        offset = (y * width + x) * 3
+        value = pixels[offset:offset + 3]
+        colors.add(value)
+        total += 1
+        if theme and value.hex() == theme:
+            matching += 1
+if total == 0:
+    print("no samples")
+    sys.exit(1)
+flat = len(colors) <= 2 or bool(theme) and matching / total > 0.95
+print(f"colors={len(colors)} themeMatch={matching}/{total} flat={flat}")
+sys.exit(0 if flat else 1)
+PY
+)
+  status=$?
+  log_debug "background check: ${verdict:-no verdict}"
+  return "$status"
+}
+
+# Verify first, then repair the cause: a wallpaper that was never set, or a layer
+# that lost its buffer. Upstream documents the layer case as "a black desktop
+# until omarchy-shell is restarted", so that is the escalation.
+verify_and_repair_background() {
+  local capture background theme_name
+  # The repaint above runs a short reveal; give it a moment before looking.
+  sleep 0.6
+  capture=$(mktemp "${TMPDIR:-/tmp}/riftvm-background.XXXXXX.ppm")
+  if ! background_needs_repair "$capture"; then
+    log_debug "Omarchy background is painted; no repair needed"
+    rm -f "$capture"
+    return 0
+  fi
+  background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
+  discover_hyprland_instance || true
+  if [[ ! -f $background ]]; then
+    theme_name=$(basename "$(readlink -f "$STATE_HOME/omarchy/current/theme" 2>/dev/null || true)")
+    log_debug "no wallpaper at $STATE_HOME/omarchy/current/background; re-applying theme ${theme_name:-unknown}"
+    if [[ -n $theme_name ]] && command -v omarchy-theme-set >/dev/null 2>&1; then
+      timeout "$SHELL_IPC_TIMEOUT" omarchy-theme-set "$theme_name" >/dev/null 2>&1 ||
+        log_debug "omarchy-theme-set $theme_name failed"
+    fi
+  else
+    log_debug "wallpaper $background is set but the desktop is flat; restarting omarchy-shell"
+    if command -v omarchy-restart-shell >/dev/null 2>&1; then
+      timeout "$SHELL_IPC_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 ||
+        log_debug "omarchy-restart-shell failed"
+    fi
+  fi
+  sleep 2
+  if background_needs_repair "$capture"; then
+    log_debug "Omarchy background is still not painted after the repair"
+  else
+    log_debug "Omarchy background repaired"
+  fi
+  rm -f "$capture"
+}
+
 # Keep cheap DRM polling responsive, but avoid compositor IPC on every idle tick.
 # Retry unconfirmed mode requests on the next tick. A periodic audit also repairs
 # compositor reloads/restarts that do not change the DRM signature.
@@ -230,7 +355,10 @@ watch_tick() {
   fi
   if (( ticks_until_repaint > 0 )); then
     ticks_until_repaint=$((ticks_until_repaint - 1))
-    (( ticks_until_repaint > 0 )) || repaint_background
+    if (( ticks_until_repaint == 0 )); then
+      repaint_background
+      verify_and_repair_background
+    fi
   fi
 }
 
