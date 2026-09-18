@@ -277,15 +277,21 @@ PY
 # that lost its buffer. Upstream documents the layer case as "a black desktop
 # until omarchy-shell is restarted", so that is the escalation.
 verify_and_repair_background() {
-  local capture background theme_name
-  # The repaint above runs a short reveal; give it a moment before looking.
-  sleep 0.6 8>&-
+  local capture background theme_name attempt flat=0
   capture=$(mktemp "${TMPDIR:-/tmp}/riftvm-background.XXXXXX.ppm")
-  if ! background_needs_repair "$capture"; then
-    log_debug "Omarchy background is painted; no repair needed"
-    rm -f "$capture"
-    return 0
-  fi
+  # Two captures, because a shell that is still starting is also a flat screen for
+  # a moment. Only a desktop that stays flat is worth repairing.
+  for attempt in 1 2; do
+    sleep 0.6 8>&-
+    if ! background_needs_repair "$capture"; then
+      log_debug "Omarchy background is painted; no repair needed"
+      rm -f "$capture"
+      return 0
+    fi
+    flat=$((flat + 1))
+    ((attempt == 1)) && sleep 1.5 8>&-
+  done
+  log_debug "Omarchy background is flat in $flat captures; repairing"
   background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
   discover_hyprland_instance || true
   if [[ ! -f $background ]]; then
@@ -317,6 +323,15 @@ verify_and_repair_background() {
     log_debug "Omarchy background repaired"
   fi
   rm -f "$capture"
+}
+
+# A desktop that came up without its wallpaper stays bare until something redraws
+# the layer, and a settled session never changes the mode again, so check once when
+# the watcher starts instead of waiting for a mode change that may never come.
+startup_background_check() {
+  sleep "${OMARCHY_RIFTVM_STARTUP_SETTLE_SECONDS:-6}" 8>&-
+  discover_hyprland_instance || return 0
+  verify_and_repair_background
 }
 
 # Keep cheap DRM polling responsive, but avoid compositor IPC on every idle tick.
@@ -396,6 +411,7 @@ log_debug "virtio_gpu DRM device detected"
 previous=$(mode_signature)
 log_debug "initial DRM signature: $previous"
 watch_tick
+startup_background_check
 while sleep "$POLL_INTERVAL"; do
   watch_tick
 done
