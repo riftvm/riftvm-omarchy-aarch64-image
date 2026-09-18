@@ -1,13 +1,9 @@
 name: Build AArch64 RiftVM image candidate
 
 on:
-  schedule:
-    # Weekly rebuilds refresh verified rolling Arch/Node inputs while keeping
-    # the Omarchy and RiftVM source revisions immutable. Output stays a draft
-    # until native guest acceptance signs and promotes its Factory assets.
-    - cron: '17 8 * * 1'
-  # Release tags are outputs of this workflow. Publishing a draft must not
-  # trigger another build of the same release.
+  # Manual only: a candidate is built when a release is wanted, never on a
+  # schedule. Output stays a draft until native guest acceptance signs and
+  # promotes its Factory assets.
   workflow_dispatch:
     inputs:
       release_tag:
@@ -51,9 +47,6 @@ jobs:
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             tag=$REQUESTED_TAG
-          elif [[ "$EVENT_NAME" == "schedule" ]]; then
-            source ./sources.env
-            tag="v${OMARCHY_AARCH64_VERSION}-riftvm.weekly.$(date -u +%Y%m%d)"
           else
             echo "Unsupported event: $EVENT_NAME" >&2
             exit 1

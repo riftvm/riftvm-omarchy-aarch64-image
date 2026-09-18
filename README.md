@@ -136,7 +136,7 @@ A successful build also emits package inventories and
 `build/image-provenance.txt`, including the pinned RiftVM Guest Agent source
 revision and the digest of the exact binary installed into the image.
 
-The image release workflow runs manually or on its weekly schedule. For a manual
+The image release workflow runs on request only, never on a schedule. For a manual
 build, choose a new `release_tag`. Publishing a release or pushing a tag does not
 start another image build; existing releases are protected against overwriting.
 

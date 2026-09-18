@@ -1,8 +1,7 @@
 name: Check official Omarchy release
 
 on:
-  schedule:
-    - cron: '41 7 * * *'
+  # Manual only: run it when the pinned Omarchy version is being reviewed.
   workflow_dispatch:
 
 permissions:
