@@ -278,7 +278,9 @@ PY
 # until omarchy-shell is restarted", so that is the escalation.
 verify_and_repair_background() {
   local capture background theme_name attempt flat=0
-  capture=$(mktemp "${TMPDIR:-/tmp}/riftvm-background.XXXXXX.ppm")
+  # No suffix: BSD mktemp only accepts a template that ends in X characters,
+  # and `grim -t ppm` already fixes the format.
+  capture=$(mktemp "${TMPDIR:-/tmp}/riftvm-background.XXXXXX")
   # Two captures, because a shell that is still starting is also a flat screen for
   # a moment. Only a desktop that stays flat is worth repairing.
   for attempt in 1 2; do
@@ -329,9 +331,14 @@ verify_and_repair_background() {
 # the layer, and a settled session never changes the mode again, so check once when
 # the watcher starts instead of waiting for a mode change that may never come.
 startup_background_check() {
-  sleep "${OMARCHY_RIFTVM_STARTUP_SETTLE_SECONDS:-6}" 8>&-
-  discover_hyprland_instance || return 0
-  verify_and_repair_background
+  # In the background: the capture and a possible repair take seconds, and the
+  # poll loop has to keep honouring host resizes during that time. The subshell
+  # closes the instance lock so an orphaned check cannot hold it.
+  (
+    sleep "${OMARCHY_RIFTVM_STARTUP_SETTLE_SECONDS:-6}"
+    discover_hyprland_instance || exit 0
+    verify_and_repair_background
+  ) 8>&- &
 }
 
 # Keep cheap DRM polling responsive, but avoid compositor IPC on every idle tick.
