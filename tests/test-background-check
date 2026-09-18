@@ -67,3 +67,56 @@ if background_needs_repair "$fixture/out.ppm"; then
 fi
 
 echo 'PASS: the wallpaper check separates a flat desktop from a painted one'
+
+# The repair has to pick the cause: no wallpaper at all is a theme that was never
+# seeded, while a set wallpaper on a flat screen is a layer that lost its buffer.
+mv "$fixture/bin/grim.disabled" "$fixture/bin/grim"
+export OMARCHY_RIFTVM_TEST_CAPTURE="$fixture/flat.ppm"
+sleep() { :; }
+cat >"$fixture/bin/omarchy-theme-set" <<'THEMESET'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+THEMESET
+cat >"$fixture/bin/omarchy-restart-shell" <<'RESTART'
+#!/bin/bash
+printf 'restart-shell\n' >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+RESTART
+chmod 755 "$fixture/bin/omarchy-theme-set" "$fixture/bin/omarchy-restart-shell"
+export OMARCHY_RIFTVM_TEST_THEMESET_LOG="$fixture/repair.log"
+
+# Nothing recorded: the default Omarchy theme is seeded.
+: >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+verify_and_repair_background
+grep -Fxq 'Tokyo Night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,5p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: an unseeded workspace did not apply the default theme" >&2
+  exit 1
+}
+! grep -q 'restart-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
+  {
+    echo "FAIL: a missing wallpaper restarted the shell instead of applying a theme" >&2
+    exit 1
+  }
+
+# A recorded theme is re-applied by name.
+: >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+mkdir -p "$fixture/state/omarchy/current"
+printf 'tokyo-night\n' >"$fixture/state/omarchy/current/theme.name"
+verify_and_repair_background
+grep -Fxq 'tokyo-night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
+  {
+    echo "FAIL: the recorded theme was not re-applied" >&2
+    exit 1
+  }
+
+# A wallpaper that is set but not painted escalates to the shell restart.
+: >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+printf 'wallpaper\n' >"$fixture/wallpaper.png"
+ln -sfn "$fixture/wallpaper.png" "$fixture/state/omarchy/current/background"
+verify_and_repair_background
+grep -q 'restart-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  echo "FAIL: a set but unpainted wallpaper did not restart the shell" >&2
+  exit 1
+}
+
+echo 'PASS: the wallpaper repair picks the theme or the shell restart from the cause'

@@ -713,7 +713,7 @@ grep -Fq 'background themeTransition' "$display_watch" ||
 (
   fixture=$(mktemp -d)
   watcher_pid=
-  trap '[[ -z $watcher_pid ]] || kill "$watcher_pid" 2>/dev/null || true; rm -rf "$fixture"' EXIT
+  trap '[[ -z $watcher_pid ]] || kill "$watcher_pid" 2>/dev/null || true; rm -rf "$fixture" || true' EXIT
   mkdir -p "$fixture/drm/card0/device" "$fixture/drivers/virtio_gpu" "$fixture/drm/card0-Virtual-1"
   ln -s "$fixture/drivers/virtio_gpu" "$fixture/drm/card0/device/driver"
   printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
@@ -847,7 +847,7 @@ HYPRCTL
 (
   fixture=$(mktemp -d)
   watcher_pid=
-  trap '[[ -z $watcher_pid ]] || kill "$watcher_pid" 2>/dev/null || true; rm -rf "$fixture"' EXIT
+  trap '[[ -z $watcher_pid ]] || kill "$watcher_pid" 2>/dev/null || true; rm -rf "$fixture" || true' EXIT
   mkdir -p "$fixture/drm/card0/device" "$fixture/drivers/virtio_gpu" "$fixture/drm/card0-Virtual-1"
   ln -s "$fixture/drivers/virtio_gpu" "$fixture/drm/card0/device/driver"
   printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"

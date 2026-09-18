@@ -31,6 +31,10 @@ readonly MODE_SWITCH_WINDOW="${OMARCHY_RIFTVM_MODE_SWITCH_WINDOW:-30}"
 # The background repaint re-runs a short reveal; repeating it during a burst of
 # mode changes reads as flicker, so never repaint twice in this window.
 readonly REPAINT_MIN_INTERVAL="${OMARCHY_RIFTVM_REPAINT_MIN_INTERVAL:-5}"
+# `omarchy-theme-set` regenerates templates and restarts terminals, and the shell
+# restart replaces every panel; both need longer than a shell IPC round trip.
+readonly THEME_SET_TIMEOUT="${OMARCHY_RIFTVM_THEME_SET_TIMEOUT:-60}"
+readonly SHELL_RESTART_TIMEOUT="${OMARCHY_RIFTVM_SHELL_RESTART_TIMEOUT:-30}"
 readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
 
 now_seconds() {
@@ -44,7 +48,7 @@ log_debug() {
   # precisely when an offline image inspection is most useful.
   local line
   printf -v line '%(%FT%T%z)T %s' -1 "$*"
-  printf '%s\n' "$line" | tee -a "$LOG_FILE"
+  printf '%s\n' "$line" | tee -a "$LOG_FILE" 8>&-
 }
 
 discover_hyprland_instance() {
@@ -285,16 +289,24 @@ verify_and_repair_background() {
   background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
   discover_hyprland_instance || true
   if [[ ! -f $background ]]; then
-    theme_name=$(basename "$(readlink -f "$STATE_HOME/omarchy/current/theme" 2>/dev/null || true)")
-    log_debug "no wallpaper at $STATE_HOME/omarchy/current/background; re-applying theme ${theme_name:-unknown}"
-    if [[ -n $theme_name ]] && command -v omarchy-theme-set >/dev/null 2>&1; then
-      timeout "$SHELL_IPC_TIMEOUT" omarchy-theme-set "$theme_name" >/dev/null 2>&1 8>&- ||
-        log_debug "omarchy-theme-set $theme_name failed"
+    # Omarchy seeds the first theme from install/user/theme.sh, which only runs
+    # when `theme.name` is absent, so a workspace whose provisioning skipped that
+    # step has no theme and no wallpaper at all. Apply the recorded theme, or the
+    # same default Omarchy seeds, and the link is recreated either way.
+    # `theme.name` is the only reliable theme name: `current/theme` resolves to
+    # the staged `next-theme` directory, so its basename names the staging area,
+    # not the theme. Absent means no theme was ever applied.
+    theme_name=$(head -n 1 "$STATE_HOME/omarchy/current/theme.name" 2>/dev/null || true)
+    [[ -n $theme_name ]] || theme_name="${OMARCHY_RIFTVM_DEFAULT_THEME:-Tokyo Night}"
+    log_debug "no wallpaper at $STATE_HOME/omarchy/current/background; applying theme '$theme_name'"
+    if command -v omarchy-theme-set >/dev/null 2>&1; then
+      timeout "$THEME_SET_TIMEOUT" omarchy-theme-set "$theme_name" >/dev/null 2>&1 8>&- ||
+        log_debug "omarchy-theme-set '$theme_name' failed"
     fi
   else
     log_debug "wallpaper $background is set but the desktop is flat; restarting omarchy-shell"
     if command -v omarchy-restart-shell >/dev/null 2>&1; then
-      timeout "$SHELL_IPC_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 8>&- ||
+      timeout "$SHELL_RESTART_TIMEOUT" omarchy-restart-shell >/dev/null 2>&1 8>&- ||
         log_debug "omarchy-restart-shell failed"
     fi
   fi
