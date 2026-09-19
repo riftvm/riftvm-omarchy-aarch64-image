@@ -1,5 +1,6 @@
 # Boot and guest stack owned by the aarch64-virt image profile.
 base
+base-devel
 btrfs-progs
 dosfstools
 efibootmgr
