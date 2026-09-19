@@ -953,6 +953,12 @@ EOF
     fail "RiftVM display migration retained a stale SPICE modeline"
 )
 pass "RiftVM display migration preserves clipboard while removing SPICE mode ownership"
+grep -Fxq 'export AQ_NO_ATOMIC=1' "$ROOT/profiles/aarch64-virt/overlay/etc/xdg/uwsm/env-hyprland" ||
+  fail "the desktop Hyprland does not use legacy KMS, so it never receives virtio-gpu's cursor plane"
+grep -Fxq 'CompositorCommand=env AQ_NO_ATOMIC=1 start-hyprland -- --config /usr/share/sddm/hyprland.lua' \
+  "$ROOT/profiles/aarch64-virt/overlay/etc/sddm.conf.d/20-riftvm-cursor-plane.conf" ||
+  fail "the greeter Hyprland does not use legacy KMS, so it paints a second cursor"
+pass "RiftVM Hyprland sessions use virtio-gpu's cursor plane"
 grep -Fq -- '--riftvm-guest-agent' "$ROOT/bin/build-image" ||
   fail "image build does not require the pinned RiftVM guest agent"
 grep -Fq -- '--riftvm-guest-agent build/dependencies/rift-agent/rift-agent' \

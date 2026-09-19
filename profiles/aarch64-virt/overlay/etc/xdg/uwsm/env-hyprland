@@ -1,0 +1,9 @@
+# RiftVM: give Hyprland virtio-gpu's cursor plane.
+#
+# Linux hides a virtualized GPU's cursor plane from atomic KMS clients that do
+# not set DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, and aquamarine does not set it.
+# Hyprland then paints the pointer into every frame, which the host can only
+# show as a second, lagging cursor next to the macOS one. The legacy KMS path
+# passes the hotspot with each cursor update, so the host receives the guest's
+# cursor image and shows it as the one macOS cursor.
+export AQ_NO_ATOMIC=1
