@@ -12,6 +12,13 @@ readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 readonly MONITORS_FILE="$CONFIG_HOME/hypr/monitors.lua"
 readonly SPICE_CONFIG="$CONFIG_HOME/spice-guest-tools/config.toml"
 readonly SPICE_DEFAULT_CONFIG="${OMARCHY_RIFTVM_SPICE_DEFAULT_CONFIG:-/usr/share/spice-guest-tools/config/config.toml}"
+readonly HYPRCTL="${OMARCHY_RIFTVM_HYPRCTL:-hyprctl}"
+
+# Set when this run rewrote the compositor's monitor configuration. Only then does
+# Hyprland need a reload: a reload on every login re-applies the monitor rules
+# while the session starts, which can rebuild the output and leave Omarchy's
+# wallpaper layer without a committed buffer.
+monitors_changed=0
 
 remove_spice_monitor_ownership() {
   [[ -f $MONITORS_FILE ]] || return 0
@@ -27,6 +34,7 @@ remove_spice_monitor_ownership() {
   else
     chmod --reference="$MONITORS_FILE" "$temporary"
     mv -f "$temporary" "$MONITORS_FILE"
+    monitors_changed=1
   fi
 }
 
@@ -62,4 +70,6 @@ remove_spice_monitor_ownership
 disable_spice_display_bridge
 rm -f "$STATE_HOME/spice-guest-tools/display.state"
 systemctl --user stop spice-display-bridge.service 2>/dev/null || true
-hyprctl reload >/dev/null 2>&1 || true
+if (( monitors_changed )); then
+  "$HYPRCTL" reload >/dev/null 2>&1 || true
+fi
