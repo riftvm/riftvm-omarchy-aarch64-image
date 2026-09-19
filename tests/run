@@ -1234,13 +1234,19 @@ pass "image orchestration does not depend on a nested source repository"
 
 echo "VERDICT: PASS"
 
-folder_units="$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system"
-grep -Fxq 'What=riftvm_folders' "$folder_units/mnt-riftvm\x2dfolders.mount" || fail "host folder tag mismatch"
-grep -Fxq 'Options=rw,nosuid,nodev' "$folder_units/mnt-riftvm\x2dfolders.mount" || fail "host folders lack mount hardening"
-grep -Fxq 'Where=/mnt/riftvm-folders' "$folder_units/mnt-riftvm\x2dfolders.automount" || fail "host folders are not mounted on demand"
-grep -Fq "systemctl enable 'mnt-riftvm\\x2dfolders.automount'" "$ROOT/bin/build-image" || fail "host folder automount is not enabled"
-grep -Fq 'systemctl --global enable riftvm-host-folders.service' "$ROOT/bin/build-image" || fail "desktop Mac shortcut is not enabled"
-pass "authorized host folders are mounted separately from Agent transport"
+# RiftVM shares one exchange folder with Omarchy (riftvm_shared at
+# /mnt/riftvm-shared). The host never offers a riftvm_folders share, so a mount
+# for it only timed out on first access and left ~/Mac pointing at an empty,
+# root-owned directory the user could not write to.
+overlay="$ROOT/profiles/aarch64-virt/overlay"
+[[ ! -e "$overlay/etc/systemd/system/mnt-riftvm\x2dfolders.mount" &&
+   ! -e "$overlay/etc/systemd/system/mnt-riftvm\x2dfolders.automount" &&
+   ! -e "$overlay/etc/systemd/user/riftvm-host-folders.service" &&
+   ! -e "$overlay/usr/local/bin/riftvm-host-folders" ]] ||
+  fail "the image still ships a host-folders mount the host never provides"
+! grep -Eq 'riftvm-folders|riftvm-host-folders|riftvm\\x2dfolders' "$ROOT/bin/build-image" ||
+  fail "the image build still installs or enables the host-folders mount"
+pass "the image ships only the exchange-folder share the host provides"
 
 # Unknown decoder options must be rejected before creating a destination.
 invalid_fixture=$(mktemp -d)
