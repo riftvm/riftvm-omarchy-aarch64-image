@@ -297,11 +297,27 @@ verify_and_repair_background() {
     flat=$((flat + 1))
     ((attempt == 1)) && sleep 1.5 8>&-
   done
-  # Detection is cheap and always useful; acting on it is not. Reloading the
-  # shell's plugins or restarting the shell has left the reporter's session with
-  # no bar, so nothing here touches the session unless a caller asks for it.
+  # A set wallpaper on a flat desktop is a background layer that lost its
+  # committed buffer; a fresh Omarchy machine shows this on its first login and
+  # recovers on the next boot. Re-running the active theme's transition through
+  # the shell's own IPC makes the layer load and commit the image again without
+  # touching anything else, so it is always safe to try once.
+  background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
+  if [[ -f $background ]]; then
+    log_debug "Omarchy background is flat in $flat captures; repainting the active theme"
+    last_repaint_at=0
+    repaint_background
+    sleep 1.5 8>&-
+    if ! background_needs_repair "$capture"; then
+      log_debug "Omarchy background repainted"
+      rm -f "$capture"
+      return 0
+    fi
+  fi
+  # Anything stronger is opt-in: reloading the shell's plugins or restarting the
+  # shell has left the reporter's session with no bar.
   if [[ ${OMARCHY_RIFTVM_BACKGROUND_REPAIR:-0} != 1 ]]; then
-    log_debug "Omarchy background is flat; automatic repair is off (OMARCHY_RIFTVM_BACKGROUND_REPAIR=1 enables it)"
+    log_debug "Omarchy background is still flat; further repair is off (OMARCHY_RIFTVM_BACKGROUND_REPAIR=1 enables it)"
     rm -f "$capture"
     return 0
   fi
