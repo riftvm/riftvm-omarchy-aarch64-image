@@ -919,14 +919,25 @@ enabled = true
 EOF
   : >"$fixture/home/.local/state/spice-guest-tools/display.state"
   printf '#!/bin/bash\nexit 0\n' >"$fixture/bin/systemctl"
-  printf '#!/bin/bash\nexit 0\n' >"$fixture/bin/hyprctl"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >>"%s"\n' "$fixture/hyprctl.log" >"$fixture/bin/hyprctl"
   chmod 755 "$fixture/bin/systemctl" "$fixture/bin/hyprctl"
-  HOME="$fixture/home" \
-    XDG_CONFIG_HOME="$fixture/home/.config" \
-    XDG_STATE_HOME="$fixture/home/.local/state" \
-    PATH="$fixture/bin:$PATH" \
-    OMARCHY_RIFTVM_SPICE_DEFAULT_CONFIG="$spice_config" \
-    "$display_setup"
+  run_display_setup() {
+    HOME="$fixture/home" \
+      XDG_CONFIG_HOME="$fixture/home/.config" \
+      XDG_STATE_HOME="$fixture/home/.local/state" \
+      PATH="$fixture/bin:$PATH" \
+      OMARCHY_RIFTVM_SPICE_DEFAULT_CONFIG="$spice_config" \
+      "$display_setup"
+  }
+  run_display_setup
+  grep -Fxq reload "$fixture/hyprctl.log" ||
+    fail "RiftVM display migration did not reload Hyprland after rewriting its monitors"
+  : >"$fixture/hyprctl.log"
+  # Every later login finds nothing to migrate. A reload there rebuilds the
+  # output while the session starts, which is how the wallpaper goes missing.
+  run_display_setup
+  ! grep -Fxq reload "$fixture/hyprctl.log" ||
+    fail "RiftVM display migration reloaded Hyprland without changing its monitors"
   ! grep -Fq 'spice-guest-tools managed mode' "$fixture/home/.config/hypr/monitors.lua" ||
     fail "RiftVM display migration left SPICE monitor ownership behind"
   grep -Fq 'mode = "preferred"' "$fixture/home/.config/hypr/monitors.lua" ||
