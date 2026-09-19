@@ -44,8 +44,13 @@ The RiftVM image contains:
   and `@pkg` subvolumes;
 - Limine, an AArch64 UKI, branded boot menu, factory snapshot, and recovery
   entries;
-- VirtIO graphics, block storage, networking, entropy, input, and audio devices
-  supported by Virtualization.framework;
+- the `virtio_gpu` kernel driver and Mesa VirGL for RiftVM's Custom VirGL
+  virtio-gpu, plus VirtIO block storage, networking, entropy, input, and audio;
+- the RiftVM Guest Agent (input, clipboard, shortcuts, notifications, owner
+  setup) and a display watcher that applies the session mode and repaints a
+  missing wallpaper;
+- the managed exchange folder at `/mnt/riftvm-shared`; no other host folder is
+  mounted;
 - PipeWire audio and its PulseAudio, ALSA, JACK, and GStreamer compatibility
   layers;
 - an interactive first-boot wizard for owner credentials, keyboard, Git
@@ -70,13 +75,13 @@ brew install --cask riftvm/tap/riftvm
 ```
 
 Or download the app from [GitHub Releases](https://github.com/riftvm/riftvm/releases/latest).
-Open RiftVM and choose **Create Omarchy Workspace**. See [riftvm.com](https://riftvm.com) for details.
+Open RiftVM and choose **Prepare Omarchy**. See [riftvm.com](https://riftvm.com) for details.
 
-The unified App creates an Omarchy workspace from an exact, signed factory
-manifest. It verifies the Ed25519 signature and every image part, keeps a shared
-read-only factory cache, and gives each workspace its own writable disk,
-machine identity and owner credentials. Image updates apply to new workspaces;
-they do not replace existing guest disks.
+The App prepares one Omarchy machine from an exact, signed factory manifest. It
+verifies the Ed25519 signature and every image part, keeps a read-only factory
+cache, and gives the machine its own writable disk, machine identity and owner
+credentials. Image updates apply to newly prepared machines; they do not replace
+an existing guest disk.
 
 Factory candidates use immutable versioned URLs. Do not use `releases/latest`
 for a candidate: GitHub excludes prereleases from that endpoint.
@@ -97,7 +102,7 @@ runtime acceptance, in addition to matching uploaded digests.
 
 Drafts may also contain the original sparse-stream export, thumbnail and import
 script for development tooling. That raw import route does not replace the
-unified App's Omarchy creation flow and is not the supported first-install path.
+App's Prepare Omarchy flow and is not the supported first-install path.
 
 Each part stays below GitHub's 2 GiB asset limit. The guest disk has a 64 GiB
 logical capacity; sparse storage avoids allocating all of it on the host.
@@ -165,12 +170,19 @@ Package a local RiftVM Release layout:
 
 ## Display compatibility
 
-The virtio-gpu display watcher disables Hyprland's `debug:vfr` on RiftVM.
-With Hyprland 0.56, keyboard input can reach applications while their frames
-remain stale until the pointer moves. Continuous rendering avoids this stall;
-the watcher reapplies it after configuration reloads. This trades some idle
-rendering efficiency for responsive updates and should be reevaluated when the
-compositor or virtual GPU changes. It does not synthesize mouse input.
+- **Cursor plane.** Linux hides the virtio-gpu cursor plane from atomic KMS
+  clients that do not declare cursor hotspot support, and Hyprland's backend
+  does not. The image sets `AQ_NO_ATOMIC=1` for Hyprland sessions
+  (`/etc/xdg/uwsm/env-hyprland`) and the SDDM greeter
+  (`/etc/sddm.conf.d/20-riftvm-cursor-plane.conf`), so the pointer image reaches
+  RiftVM as a cursor update and the host shows exactly one cursor.
+- **Fixed mode.** RiftVM keeps one display mode per session. The display watcher
+  applies it and reloads Hyprland only when the monitor layout actually changed.
+- **Wallpaper.** On the first login the background layer can lose its buffer.
+  The watcher detects this and asks omarchy-shell to repaint it without
+  restarting the shell.
+- **Frame scheduling.** Hyprland's `debug:vfr` is left alone; see
+  [demand rendering](docs/demand-rendering.md).
 
 ## Tests
 
