@@ -171,15 +171,51 @@ grep -Fq 'hl.dsp.exec_cmd("omarchy-launch-shell")' "$OMARCHY_RIFTVM_TEST_THEMESE
 echo 'PASS: the wallpaper repair seeds a theme or rebuilds the layer, never killing the shell'
 echo 'PASS: a dead shell is relaunched through the compositor'
 
-# With the repair off, a flat desktop is reported and nothing else happens.
+# By default a set but unpainted wallpaper gets exactly one repaint of the active
+# theme through the shell's own IPC, and nothing stronger.
+cat >"$fixture/bin/omarchy-shell" <<'SHELLIPC'
+#!/bin/bash
+printf '%s\n' "$*" >>"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+exit 0
+SHELLIPC
+chmod 755 "$fixture/bin/omarchy-shell"
 (
   OMARCHY_RIFTVM_BACKGROUND_REPAIR=0
   : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
   verify_and_repair_background
 )
-[[ ! -s $OMARCHY_RIFTVM_TEST_THEMESET_LOG ]] || {
+[[ $(grep -c '^background themeTransition ' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG") -eq 1 ]] || {
   sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
-  echo "FAIL: the background repair acted while it was off" >&2
+  echo "FAIL: a flat desktop was not repainted once through the shell" >&2
   exit 1
 }
-echo 'PASS: the background repair is opt-in and leaves the session alone by default'
+! grep -qE 'rescanPlugins|forcerendererreload|launch-shell|restart-shell|^tokyo-night$|^Tokyo Night$' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: the default repair went beyond a repaint" >&2
+  exit 1
+}
+echo 'PASS: by default a flat desktop is repainted once and nothing stronger runs'
+
+# A repaint that brings the wallpaper back ends the repair, even when the
+# stronger steps are enabled.
+cp "$fixture/flat.ppm" "$fixture/live.ppm"
+export OMARCHY_RIFTVM_TEST_CAPTURE="$fixture/live.ppm"
+cat >"$fixture/bin/omarchy-shell" <<SHELLIPC
+#!/bin/bash
+printf '%s\n' "\$*" >>"\$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+[[ \$1 == background ]] && cp "$fixture/wallpaper.ppm" "$fixture/live.ppm"
+exit 0
+SHELLIPC
+chmod 755 "$fixture/bin/omarchy-shell"
+(
+  OMARCHY_RIFTVM_BACKGROUND_REPAIR=1
+  : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
+  verify_and_repair_background
+)
+grep -q '^background themeTransition ' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" &&
+  ! grep -qE 'rescanPlugins|forcerendererreload|launch-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: a repaint that restored the wallpaper did not end the repair" >&2
+  exit 1
+}
+echo 'PASS: a successful repaint ends the repair'
