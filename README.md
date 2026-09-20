@@ -51,6 +51,10 @@ The RiftVM image contains:
   missing wallpaper;
 - the managed exchange folder at `/mnt/mac`; no other host folder is
   mounted;
+- screen recording through Omarchy's own capture entry, backed by wf-recorder:
+  gpu-screen-recorder needs a GPU vendor it recognises and a hardware encoder,
+  and this machine has neither, so `usr/bin/gpu-screen-recorder` in the overlay
+  translates its arguments and encodes on the CPU instead;
 - PipeWire audio and its PulseAudio, ALSA, JACK, and GStreamer compatibility
   layers, over a `virtio_snd` driver the image builds with DKMS because Arch
   Linux ARM ships its kernel with `CONFIG_SND_VIRTIO` unset — without it the

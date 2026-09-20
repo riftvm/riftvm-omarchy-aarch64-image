@@ -1,0 +1,66 @@
+#!/bin/bash
+# gpu-screen-recorder, for a machine whose GPU it does not recognise.
+#
+# Omarchy records with gpu-screen-recorder, which needs a hardware encoder and
+# a GPU vendor it knows. Under RiftVM it exits immediately with
+# "unknown gpu vendor: Mesa", and VA-API offers VAEntrypointVideoProc only —
+# there is no encode entrypoint to fall back to. wf-recorder encodes on the CPU
+# and works, so this translates the arguments Omarchy passes and runs that
+# instead, leaving the rest of omarchy-capture-screenrecording untouched.
+#
+# argv[0] stays "gpu-screen-recorder" on purpose: the caller finds the running
+# recorder with `pgrep -f "^gpu-screen-recorder"` and stops it with SIGINT,
+# which wf-recorder handles by finalizing the file.
+
+set -uo pipefail
+
+target="" output="" framerate=30 audio=""
+
+while (($#)); do
+  case $1 in
+    -w) target=${2:-}; shift 2 ;;
+    -o) output=${2:-}; shift 2 ;;
+    -f) framerate=${2:-30}; shift 2 ;;
+    -a) audio=${2:-}; shift 2 ;;
+    # Accepted and ignored: these select hardware encoding behaviour that does
+    # not apply when ffmpeg encodes on the CPU.
+    -s|-k|-fm|-ac|-fallback-cpu-encoding|-q|-r|-cr|-df|-sc|-cursor|-keyint) shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+[[ -n $output ]] || { echo "gpu-screen-recorder: no output file" >&2; exit 64; }
+
+args=(-c libx264 -r "$framerate" -f "$output")
+
+case $target in
+  # gpu-screen-recorder takes a region as WxH+X+Y; wf-recorder wants "X,Y WxH".
+  *x*+*+*)
+    geometry=${target}
+    size=${geometry%%+*}
+    offsets=${geometry#*+}
+    x=${offsets%%+*}
+    y=${offsets#*+}
+    args+=(-g "$x,$y ${size}")
+    ;;
+  portal|"")
+    # No picker involved: record the focused monitor.
+    args+=(-o "$(omarchy-hyprland-monitor-focused 2>/dev/null)")
+    ;;
+  *)
+    args+=(-o "$target")
+    ;;
+esac
+
+if [[ -n $audio ]]; then
+  # Omarchy asks for default_output and/or default_input. wf-recorder takes one
+  # PipeWire device, so prefer the microphone when both were requested.
+  if [[ $audio == *default_input* ]]; then
+    args+=(--audio)
+  else
+    sink=$(pactl get-default-sink 2>/dev/null)
+    [[ -n $sink ]] && args+=("--audio=${sink}.monitor")
+  fi
+fi
+
+exec -a gpu-screen-recorder wf-recorder "${args[@]}"

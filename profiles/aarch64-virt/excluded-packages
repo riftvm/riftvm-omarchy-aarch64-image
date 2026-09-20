@@ -6,6 +6,10 @@ bluez-utils
 bolt
 brightnessctl
 ddcutil
+# Needs a GPU vendor it recognises and a hardware encoder; under RiftVM it
+# exits with "unknown gpu vendor: Mesa" and VA-API offers no encode
+# entrypoint. overlay/usr/bin/gpu-screen-recorder takes its place and records
+# with wf-recorder instead.
 gpu-screen-recorder
 hyprland-preview-share-picker
 hyprsunset

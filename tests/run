@@ -1176,6 +1176,19 @@ rm -rf -- "$invalid_fixture"
 pass "decoder rejects unsupported options"
 
 
+# Screen recording. gpu-screen-recorder needs a GPU vendor it recognises and a
+# hardware encoder; this machine has neither, so the overlay stands in for it.
+recorder="$ROOT/profiles/aarch64-virt/overlay/usr/bin/gpu-screen-recorder"
+[[ -x $recorder ]] || fail "the screen-recording stand-in is missing or not executable"
+grep -qx 'wf-recorder' "$ROOT/profiles/aarch64-virt/runtime-packages" ||
+  fail "wf-recorder is not installed, so the stand-in has nothing to record with"
+grep -qx 'gpu-screen-recorder' "$ROOT/profiles/aarch64-virt/excluded-packages" ||
+  fail "the real gpu-screen-recorder would be installed over the stand-in"
+grep -Fq 'exec -a gpu-screen-recorder wf-recorder' "$recorder" ||
+  fail "the stand-in must keep argv[0], or pgrep -f '^gpu-screen-recorder' cannot stop it"
+bash -n "$recorder" || fail "the screen-recording stand-in does not parse"
+pass "screen recording has a working recorder behind Omarchy's entry point"
+
 # Sound. Arch Linux ARM builds its kernel with CONFIG_SND_VIRTIO unset, so the
 # virtio sound device RiftVM provides has no driver unless the image builds one.
 snd_src=$(compgen -G "$ROOT/profiles/aarch64-virt/overlay/usr/src/riftvm-virtio-snd-*" | head -1) ||
