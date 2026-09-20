@@ -985,7 +985,10 @@ build_virtio_sound_module() {
   module="$MOUNT_DIR/usr/lib/modules/$kernel/updates/dkms/virtio_snd.ko"
   [[ -f $module || -f $module.zst ]] \
     || fail "dkms reported success but virtio_snd.ko is not in $kernel"
-  target_chroot modinfo virtio_snd >/dev/null \
+  # -k is required: the chroot's uname reports the build machine's kernel, not
+  # the one being installed into the image, and modinfo would look for modules
+  # of a kernel this filesystem has never had.
+  target_chroot modinfo -k "$kernel" virtio_snd >/dev/null \
     || fail "virtio_snd is built but modinfo cannot resolve it; depmod did not pick it up"
 }
 
