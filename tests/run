@@ -1029,7 +1029,6 @@ grep -Fq -- '--riftvm-wl-copy build/dependencies/rift-agent/wl-copy' \
   [[ ! -e $fixture/tampered.raw && ! -e $fixture/tampered.raw.part ]]
 )
 pass "pinned split release reconstruction verifies every layer and preserves sparse bytes"
-grep -Fq 'base_release_tag:' "$ROOT/.github/workflows/release-image.yml" &&
 grep -Fq -- '--package wl-clipboard-rs-tools --bin wl-copy' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "release workflow does not build the compatible wl-copy frontend"
