@@ -1032,7 +1032,7 @@ pass "pinned split release reconstruction verifies every layer and preserves spa
 grep -Fq -- '--package wl-clipboard-rs-tools --bin wl-copy' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "release workflow does not build the compatible wl-copy frontend"
-grep -Fq 'ReadWritePaths=/run /mnt/riftvm-shared' \
+grep -Fq 'ReadWritePaths=/run /mnt/mac' \
   "$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/rift-agent.service" ||
   fail "guest agent service cannot write the RiftVM shared folder"
 source "$ROOT/sources.env"
@@ -1057,11 +1057,11 @@ grep -Fq 'What=rift-agent' \
 grep -Fq 'Before=omarchy-provision-owner.service' \
   "$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/rift-agent.service" ||
   fail "RiftVM guest agent is not ordered before first-user provisioning"
-shared_mount="$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/mnt-riftvm\x2dshared.mount"
+shared_mount="$ROOT/profiles/aarch64-virt/overlay/etc/systemd/system/mnt-mac.mount"
 session_agent="$ROOT/profiles/aarch64-virt/overlay/etc/systemd/user/rift-session-agent.service"
 grep -Fxq 'What=riftvm_shared' "$shared_mount" ||
   fail "RiftVM Omarchy shared mount uses the wrong VirtioFS tag"
-grep -Fxq 'Where=/mnt/riftvm-shared' "$shared_mount" ||
+grep -Fxq 'Where=/mnt/mac' "$shared_mount" ||
   fail "RiftVM Omarchy shared mount uses the wrong guest path"
 grep -Fxq 'Options=rw,nosuid,nodev' "$shared_mount" ||
   fail "RiftVM Omarchy shared mount lacks its security options"
@@ -1071,20 +1071,20 @@ grep -Fxq 'NoNewPrivileges=true' "$session_agent" ||
   fail "Session Agent can gain privileges"
 grep -Fxq 'ProtectSystem=strict' "$session_agent" ||
   fail "Session Agent does not protect the guest system tree"
-grep -Fxq 'ReadWritePaths=/run/rift-agent/sessions /mnt/riftvm-shared' "$session_agent" ||
+grep -Fxq 'ReadWritePaths=/run/rift-agent/sessions /mnt/mac' "$session_agent" ||
   fail "Session Agent cannot write its narrowly scoped runtime socket"
 grep -Eq '^[[:space:]]*wl-clipboard([[:space:]]*(#.*)?)?$' \
   "$ROOT/profiles/aarch64-virt/runtime-packages" ||
   fail "Session Agent clipboard dependency is not explicit"
-grep -Fq "target_chroot systemctl enable 'mnt-riftvm\\x2dshared.mount'" "$ROOT/bin/build-image" ||
+grep -Fq "target_chroot systemctl enable 'mnt-mac.mount'" "$ROOT/bin/build-image" ||
   fail "shared mount is not enabled in the factory image"
-grep -Fq 'install -d -m755 "$MOUNT_DIR/mnt/riftvm-shared"' "$ROOT/bin/build-image" ||
+grep -Fq 'install -d -m755 "$MOUNT_DIR/mnt/mac"' "$ROOT/bin/build-image" ||
   fail "shared mount point is not created in the factory image"
 grep -Fq 'target_chroot systemctl --global enable rift-session-agent.service' "$ROOT/bin/build-image" ||
   fail "Session Agent is not globally enabled for the owner session"
 for required in \
-  'etc/systemd/system/multi-user.target.wants/mnt-riftvm\x2dshared.mount' \
-  mnt/riftvm-shared \
+  'etc/systemd/system/multi-user.target.wants/mnt-mac.mount' \
+  mnt/mac \
   etc/systemd/user/graphical-session.target.wants/rift-session-agent.service; do
   grep -Fq "$required" "$ROOT/bin/build-image" ||
     fail "target validation does not require $required"
@@ -1153,7 +1153,7 @@ pass "image orchestration does not depend on a nested source repository"
 echo "VERDICT: PASS"
 
 # RiftVM shares one exchange folder with Omarchy (riftvm_shared at
-# /mnt/riftvm-shared). The host never offers a riftvm_folders share, so a mount
+# /mnt/mac). The host never offers a riftvm_folders share, so a mount
 # for it only timed out on first access and left ~/Mac pointing at an empty,
 # root-owned directory the user could not write to.
 overlay="$ROOT/profiles/aarch64-virt/overlay"

@@ -49,7 +49,7 @@ The RiftVM image contains:
 - the RiftVM Guest Agent (input, clipboard, shortcuts, notifications, owner
   setup) and a display watcher that applies the session mode and repaints a
   missing wallpaper;
-- the managed exchange folder at `/mnt/riftvm-shared`; no other host folder is
+- the managed exchange folder at `/mnt/mac`; no other host folder is
   mounted;
 - PipeWire audio and its PulseAudio, ALSA, JACK, and GStreamer compatibility
   layers;

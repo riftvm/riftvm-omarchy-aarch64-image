@@ -14,7 +14,7 @@ NoNewPrivileges=true
 ProtectHome=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/run /mnt/riftvm-shared
+ReadWritePaths=/run /mnt/mac
 
 [Install]
 WantedBy=multi-user.target

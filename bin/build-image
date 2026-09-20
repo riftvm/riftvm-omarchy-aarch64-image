@@ -932,7 +932,7 @@ EOF
   install -m755 "$MOUNT_DIR/usr/bin/omarchy-hyprland-monitor-watch" \
     "$MOUNT_DIR/usr/local/libexec/omarchy-hyprland-monitor-watch-upstream"
   cp -a --no-preserve=ownership "$OVERLAY_DIR/." "$MOUNT_DIR/"
-  install -d -m755 "$MOUNT_DIR/mnt/riftvm-shared"
+  install -d -m755 "$MOUNT_DIR/mnt/mac"
   install -m755 "$RIFTVM_GUEST_AGENT_BINARY" "$MOUNT_DIR/usr/local/sbin/rift-agent"
   # /usr/local/bin precedes the packaged /usr/bin implementation for both the
   # Session Agent and interactive Omarchy shells. Keep wl-paste packaged until
@@ -948,7 +948,7 @@ EOF
     >"$MOUNT_DIR/etc/omarchy-aarch64/managed-packages"
   target_chroot systemctl enable omarchy-aarch64-grow-root.service
   target_chroot systemctl enable run-rift\\x2dagent\\x2dconfig.mount rift-agent.service
-  target_chroot systemctl enable 'mnt-riftvm\x2dshared.mount'
+  target_chroot systemctl enable 'mnt-mac.mount'
   # This display path is independent of SPICE.  Enable dedicated user units
   # globally so an RiftVM virtio-gpu session does not inherit SPICE port or
   # WAYLAND_DISPLAY conditions from optional clipboard integration services.
@@ -1237,10 +1237,10 @@ validate_target() {
     etc/systemd/system/multi-user.target.wants/limine-snapper-sync.service
     etc/systemd/system/multi-user.target.wants/omarchy-provision-owner.service
     etc/systemd/system/multi-user.target.wants/rift-agent.service
-    'etc/systemd/system/multi-user.target.wants/mnt-riftvm\x2dshared.mount'
+    'etc/systemd/system/multi-user.target.wants/mnt-mac.mount'
     etc/systemd/system/multi-user.target.wants/run-rift\\x2dagent\\x2dconfig.mount
-    'etc/systemd/system/mnt-riftvm\x2dshared.mount'
-    mnt/riftvm-shared
+    'etc/systemd/system/mnt-mac.mount'
+    mnt/mac
     etc/systemd/user/rift-session-agent.service
     etc/systemd/user/graphical-session.target.wants/rift-session-agent.service
     etc/systemd/system/systemd-oomd.service
