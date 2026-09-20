@@ -970,79 +970,6 @@ grep -Fq -- '-X main.version=${{ steps.sources.outputs.riftvm_agent_ref }}' \
 grep -Fq -- '--riftvm-wl-copy build/dependencies/rift-agent/wl-copy' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "release workflow does not bake the pinned wl-copy frontend"
-[[ -x $ROOT/bin/rebake-riftvm-integration && -x $ROOT/bin/rebake-riftvm-integration-container ]] ||
-  fail "verified integration-only image rebake tools are not executable"
-grep -Fq 'pacman -Syu --needed --noconfirm btrfs-progs util-linux' \
-  "$ROOT/bin/rebake-riftvm-integration-container" ||
-  fail "integration rebake container does not provision its filesystem tools"
-grep -Fq -- '--owner-provisioning-consumer)' \
-  "$ROOT/bin/rebake-riftvm-integration-container" ||
-  fail "integration rebake container does not forward the owner provisioning consumer"
-grep -Fq -- '--precloned-output)' "$ROOT/bin/rebake-riftvm-integration-container" &&
-  grep -Fq 'precloned output differs from the verified base image' "$ROOT/bin/rebake-riftvm-integration" ||
-  fail "integration rebake does not safely support host-cloned sparse output"
-grep -Fq -- '--rift-session-agent-unit build/dependencies/riftvm/GuestAgent/linux/rift-session-agent.service' \
-  "$ROOT/.github/workflows/release-image.yml" ||
-  fail "integration rebake does not install the pinned Session Agent unit"
-grep -Fq -- '--owner-provisioning-consumer profiles/aarch64-virt/overlay/usr/local/libexec/riftvm-owner-provisioning' \
-  "$ROOT/.github/workflows/release-image.yml" ||
-  fail "integration rebake does not install the RiftVM owner provisioning consumer"
-[[ -x $ROOT/bin/reconstruct-riftvm-release ]] ||
-  fail "pinned base-release reconstruction tool is not executable"
-grep -Fq '[[ $actual == "$BASE_SHA256" ]]' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'ensure_loop_device_nodes' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'ensure_loop_partition_nodes' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'btrfs property set -ts "$factory" ro false' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'btrfs subvolume snapshot "$root" "$factory"' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'btrfs property set -ts "$factory" ro true' "$ROOT/bin/rebake-riftvm-integration" &&
-  grep -Fq 'factory/etc/systemd/user/rift-session-agent.service' "$ROOT/bin/rebake-riftvm-integration" ||
-  fail "integration rebake does not verify its base and atomically refresh the factory snapshot"
-if sed -n '/^cleanup()/,/^}/p' "$ROOT/bin/rebake-riftvm-integration" | grep -Fq 'rm -rf'; then
-  fail "integration rebake cleanup recursively deletes a mount tree"
-fi
-(
-  # shellcheck source=../bin/rebake-riftvm-integration
-  source "$ROOT/bin/rebake-riftvm-integration"
-  fixture=$(mktemp -d)
-  trap 'rm -rf "$fixture"' EXIT
-  root="$fixture/root"
-  OUTPUT_IMAGE="$fixture/output.raw"
-  AGENT_BINARY="$fixture/agent"
-  SESSION_AGENT_UNIT="$fixture/rift-session-agent.service"
-  OWNER_PROVISIONING_CONSUMER="$fixture/riftvm-owner-provisioning"
-  AGENT_SOURCE_URL=https://github.com/riftvm/riftvm.git
-  AGENT_SOURCE_REF=0123456789abcdef0123456789abcdef01234567
-  EXPECTED_OMARCHY_REF=1111111111111111111111111111111111111111
-  EXPECTED_WL_COPY_REF=2222222222222222222222222222222222222222
-  BASE_SHA256=abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd
-  mkdir -p "$root/usr/share/omarchy-aarch64"
-  printf 'new agent\n' >"$AGENT_BINARY"
-  printf '[Service]\nReadWritePaths=/run/rift-agent/sessions /mnt/riftvm-shared\n' >"$SESSION_AGENT_UNIT"
-  printf '#!/bin/bash\n' >"$OWNER_PROVISIONING_CONSUMER"
-  cat >"$root/usr/share/omarchy-aarch64/image-build.txt" <<'EOF'
-built_at=2026-09-04T00:00:00Z
-rootfs_sha256=preserved
-omarchy_source_ref=1111111111111111111111111111111111111111
-riftvm_wl_copy_source_ref=2222222222222222222222222222222222222222
-riftvm_guest_agent_source_url=https://example.invalid/old.git
-riftvm_guest_agent_source_ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-riftvm_guest_agent_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-riftvm_integration_rebaked_at=old
-riftvm_integration_base_raw_sha256=old
-EOF
-  rewrite_provenance "$root"
-  provenance="$root/usr/share/omarchy-aarch64/image-build.txt"
-  validate_base_provenance "$provenance"
-  grep -qxF 'built_at=2026-09-04T00:00:00Z' "$provenance"
-  grep -qxF 'rootfs_sha256=preserved' "$provenance"
-  [[ $(grep -c '^riftvm_guest_agent_source_ref=' "$provenance") == 1 ]]
-  grep -qxF "riftvm_guest_agent_source_ref=$AGENT_SOURCE_REF" "$provenance"
-  grep -qxF "riftvm_session_agent_unit_sha256=$(sha256sum "$SESSION_AGENT_UNIT" | awk '{print $1}')" "$provenance"
-  grep -qxF "riftvm_owner_provisioning_consumer_sha256=$(sha256sum "$OWNER_PROVISIONING_CONSUMER" | awk '{print $1}')" "$provenance"
-  grep -qxF "riftvm_integration_base_raw_sha256=$BASE_SHA256" "$provenance"
-  cmp -s "$provenance" "$fixture/image-provenance.txt"
-)
-pass "integration-only rebake preserves OS provenance and binds the new Agent to its verified base"
 (
   fixture=$(mktemp -d)
   trap 'rm -rf "$fixture"' EXIT
@@ -1103,14 +1030,6 @@ pass "integration-only rebake preserves OS provenance and binds the new Agent to
 )
 pass "pinned split release reconstruction verifies every layer and preserves sparse bytes"
 grep -Fq 'base_release_tag:' "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq 'base_image_sha256:' "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq './bin/reconstruct-riftvm-release' "$ROOT/.github/workflows/release-image.yml" &&
-  grep -Fq './bin/rebake-riftvm-integration-container' "$ROOT/.github/workflows/release-image.yml" ||
-  fail "release workflow cannot produce a digest-pinned integration-only rebake"
-grep -Fq "if: steps.base.outputs.use_rebake != 'true'" \
-  "$ROOT/.github/workflows/release-image.yml" ||
-  fail "integration-only rebakes can publish unrelated rolling-input caches"
-pass "release workflow keeps full rebuilds and digest-pinned integration rebakes separate"
 grep -Fq -- '--package wl-clipboard-rs-tools --bin wl-copy' \
   "$ROOT/.github/workflows/release-image.yml" ||
   fail "release workflow does not build the compatible wl-copy frontend"

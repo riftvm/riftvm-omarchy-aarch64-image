@@ -145,21 +145,6 @@ The image release workflow runs on request only, never on a schedule. For a manu
 build, choose a new `release_tag`. Publishing a release or pushing a tag does not
 start another image build; existing releases are protected against overwriting.
 
-When the operating-system and Omarchy package graph is already accepted and
-only the statically linked RiftVM Guest Agent changed, the manual release workflow
-also supports an integration-only rebake. Supply both `base_release_tag` and
-the complete raw `base_image_sha256`. The workflow downloads every split base
-asset, validates the manifest, each part, the compressed stream, and the
-reconstructed raw image, then changes a copy. It replaces the Agent in the
-bootable `@` subvolume, recreates the read-only `@factory` snapshot, and records
-the base digest plus new source revision in image provenance. The original
-release and its raw image are never modified.
-
-This path is deliberately unavailable for kernel, boot, system package,
-Omarchy, overlay, or `wl-copy` changes; those require a full image rebuild. A
-rebaked candidate is still a new factory image and must pass the same fresh-VM
-acceptance and publication gates as a full build.
-
 Package a local RiftVM Release layout:
 
 ```bash
