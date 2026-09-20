@@ -52,7 +52,10 @@ The RiftVM image contains:
 - the managed exchange folder at `/mnt/mac`; no other host folder is
   mounted;
 - PipeWire audio and its PulseAudio, ALSA, JACK, and GStreamer compatibility
-  layers;
+  layers, over a `virtio_snd` driver the image builds with DKMS because Arch
+  Linux ARM ships its kernel with `CONFIG_SND_VIRTIO` unset — without it the
+  sound device RiftVM provides has no driver and every application plays into a
+  null sink;
 - an interactive first-boot wizard for owner credentials, keyboard, Git
   identity, hostname, and timezone;
 - an idempotent service that expands the root partition and Btrfs filesystem

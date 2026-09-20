@@ -2,11 +2,13 @@
 base
 base-devel
 btrfs-progs
+dkms
 dosfstools
 efibootmgr
 kbd
 limine
 linux-aarch64
+linux-aarch64-headers
 mesa
 mkinitcpio
 networkmanager

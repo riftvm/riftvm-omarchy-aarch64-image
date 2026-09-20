@@ -1175,4 +1175,34 @@ fi
 rm -rf -- "$invalid_fixture"
 pass "decoder rejects unsupported options"
 
+
+# Sound. Arch Linux ARM builds its kernel with CONFIG_SND_VIRTIO unset, so the
+# virtio sound device RiftVM provides has no driver unless the image builds one.
+snd_src=$(compgen -G "$ROOT/profiles/aarch64-virt/overlay/usr/src/riftvm-virtio-snd-*" | head -1) ||
+  fail "the virtio sound DKMS sources are missing"
+[[ -f "$snd_src/dkms.conf" ]] || fail "virtio sound sources have no dkms.conf"
+grep -Fq 'AUTOINSTALL="yes"' "$snd_src/dkms.conf" ||
+  fail "virtio sound module would not survive a kernel update"
+grep -Fq 'BUILT_MODULE_NAME[0]="virtio_snd"' "$snd_src/dkms.conf" ||
+  fail "dkms.conf does not build virtio_snd"
+grep -Eq '^obj-m \+= virtio_snd\.o$' "$snd_src/Makefile" ||
+  fail "virtio sound Makefile is not an out-of-tree build"
+for object in virtio_card virtio_chmap virtio_ctl_msg virtio_jack virtio_kctl \
+  virtio_pcm virtio_pcm_msg virtio_pcm_ops; do
+  [[ -f "$snd_src/$object.c" ]] || fail "virtio sound sources are missing $object.c"
+  grep -Fq "$object.o" "$snd_src/Makefile" ||
+    fail "virtio sound Makefile does not build $object.o"
+done
+for package in dkms linux-aarch64-headers; do
+  grep -qx "$package" "$ROOT/profiles/aarch64-virt/runtime-packages" ||
+    fail "$package is not installed, so DKMS cannot rebuild after a kernel update"
+done
+grep -Fq 'build_virtio_sound_module' "$ROOT/bin/build-image" ||
+  fail "the image build never builds the virtio sound module"
+grep -Fq 'dkms install --no-depmod' "$ROOT/bin/build-image" ||
+  fail "the image build does not install the virtio sound module with dkms"
+grep -Fq 'virtio_snd.ko is not in' "$ROOT/bin/build-image" ||
+  fail "the image build trusts dkms instead of checking the module landed"
+pass "the image builds a virtio sound driver the stock kernel does not ship"
+
 python3 "$ROOT/tests/test-first-run-update"
