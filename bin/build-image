@@ -946,6 +946,7 @@ EOF
     >"$MOUNT_DIR/etc/omarchy-aarch64/excluded-packages"
   read_list "$CONFIG_DIR/omarchy-packages.aarch64" \
     >"$MOUNT_DIR/etc/omarchy-aarch64/managed-packages"
+  build_virtio_sound_module
   target_chroot systemctl enable omarchy-aarch64-grow-root.service
   target_chroot systemctl enable run-rift\\x2dagent\\x2dconfig.mount rift-agent.service
   target_chroot systemctl enable 'mnt-mac.mount'
@@ -955,6 +956,37 @@ EOF
   target_chroot systemctl --global enable \
     omarchy-riftvm-display-setup.service omarchy-riftvm-display-watch.service
   target_chroot systemctl --global enable rift-session-agent.service
+}
+
+build_virtio_sound_module() {
+  # Apple's Virtualization.framework gives the machine a virtio sound device and
+  # RiftVM configures one, but Arch Linux ARM builds its kernel with
+  # CONFIG_SND_VIRTIO unset, so nothing drives it and PipeWire falls back to a
+  # null sink. DKMS builds the overlay's copy of the upstream sources against
+  # the kernel in the image, and rebuilds after a kernel update.
+  local source_dirs=("$MOUNT_DIR"/usr/src/riftvm-virtio-snd-*)
+  local build_dirs=("$MOUNT_DIR"/usr/lib/modules/*/build)
+  local version kernel module
+
+  [[ -d ${source_dirs[0]} ]] \
+    || fail "the virtio sound DKMS sources are missing from the overlay"
+  [[ -e ${build_dirs[0]} ]] \
+    || fail "no installed kernel ships build headers, so DKMS cannot compile"
+  version=${source_dirs[0]##*/riftvm-virtio-snd-}
+  kernel=${build_dirs[0]%/build}
+  kernel=${kernel##*/}
+
+  target_chroot dkms install --no-depmod "riftvm-virtio-snd/$version" -k "$kernel"
+  target_chroot depmod -a "$kernel"
+
+  # An image that boots silent is the bug this exists to prevent, so prove the
+  # module landed rather than trusting the exit status above. udev loads it from
+  # its virtio modalias once depmod has seen it, which is what modinfo confirms.
+  module="$MOUNT_DIR/usr/lib/modules/$kernel/updates/dkms/virtio_snd.ko"
+  [[ -f $module || -f $module.zst ]] \
+    || fail "dkms reported success but virtio_snd.ko is not in $kernel"
+  target_chroot modinfo virtio_snd >/dev/null \
+    || fail "virtio_snd is built but modinfo cannot resolve it; depmod did not pick it up"
 }
 
 mask_incompatible_target_services() {
