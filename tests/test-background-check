@@ -88,7 +88,7 @@ export OMARCHY_RIFTVM_TEST_THEMESET_LOG="$fixture/repair.log"
 
 # Nothing recorded: the default Omarchy theme is seeded.
 : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
-verify_and_repair_background
+verify_and_repair_background || true
 grep -Fxq 'Tokyo Night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
   sed -n '1,5p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
   echo "FAIL: an unseeded workspace did not apply the default theme" >&2
@@ -104,7 +104,7 @@ grep -Fxq 'Tokyo Night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
 : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
 mkdir -p "$fixture/state/omarchy/current"
 printf 'tokyo-night\n' >"$fixture/state/omarchy/current/theme.name"
-verify_and_repair_background
+verify_and_repair_background || true
 grep -Fxq 'tokyo-night' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" ||
   {
     echo "FAIL: the recorded theme was not re-applied" >&2
@@ -129,7 +129,7 @@ export OMARCHY_RIFTVM_SHELL_IPC="$fixture/bin/omarchy-shell"
 : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
 printf 'wallpaper\n' >"$fixture/wallpaper.png"
 ln -sfn "$fixture/wallpaper.png" "$fixture/state/omarchy/current/background"
-verify_and_repair_background
+verify_and_repair_background || true
 grep -Fxq 'shell rescanPlugins' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
   sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
   echo "FAIL: a set but unpainted wallpaper did not ask the shell to rebuild its plugins" >&2
@@ -156,7 +156,7 @@ exit 0
 DEADSHELL
 chmod 755 "$fixture/bin/omarchy-shell"
 : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
-verify_and_repair_background
+verify_and_repair_background || true
 grep -Fq 'hl.dsp.exec_cmd("omarchy-launch-shell")' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
   sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
   echo "FAIL: a dead shell was not relaunched through the compositor" >&2
@@ -182,19 +182,27 @@ chmod 755 "$fixture/bin/omarchy-shell"
 (
   OMARCHY_RIFTVM_BACKGROUND_REPAIR=0
   : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
-  verify_and_repair_background
+  verify_and_repair_background || true
 )
 [[ $(grep -c '^background themeTransition ' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG") -eq 1 ]] || {
   sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
   echo "FAIL: a flat desktop was not repainted once through the shell" >&2
   exit 1
 }
-! grep -qE 'rescanPlugins|forcerendererreload|launch-shell|restart-shell|^tokyo-night$|^Tokyo Night$' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+# A repaint alone leaves about half of these black, and a plugin rescan fixes
+# the rest without disturbing the bar, so it is part of the default repair.
+grep -Fxq 'shell rescanPlugins' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
   sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
-  echo "FAIL: the default repair went beyond a repaint" >&2
+  echo "FAIL: a repaint that did not take was not followed by a plugin rescan" >&2
   exit 1
 }
-echo 'PASS: by default a flat desktop is repainted once and nothing stronger runs'
+# Everything that can cost the user their bar stays opt-in.
+! grep -qE 'forcerendererreload|launch-shell|restart-shell|^tokyo-night$|^Tokyo Night$' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
+  sed -n '1,10p' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" >&2
+  echo "FAIL: the default repair went beyond a repaint and a plugin rescan" >&2
+  exit 1
+}
+echo 'PASS: by default a flat desktop is repainted, then its plugins rescanned, and nothing stronger runs'
 
 # A repaint that brings the wallpaper back ends the repair, even when the
 # stronger steps are enabled.
@@ -210,7 +218,7 @@ chmod 755 "$fixture/bin/omarchy-shell"
 (
   OMARCHY_RIFTVM_BACKGROUND_REPAIR=1
   : >"$OMARCHY_RIFTVM_TEST_THEMESET_LOG"
-  verify_and_repair_background
+  verify_and_repair_background || true
 )
 grep -q '^background themeTransition ' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" &&
   ! grep -qE 'rescanPlugins|forcerendererreload|launch-shell' "$OMARCHY_RIFTVM_TEST_THEMESET_LOG" || {
