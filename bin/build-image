@@ -327,6 +327,7 @@ resolve_rootfs() {
 
   ROOTFS_PATH="$CACHE_DIR/${ROOTFS_URL##*/}"
   ROOTFS_SIGNATURE="$ROOTFS_PATH.sig"
+  ROOTFS_PIN_APPLIES=1
   if [[ ! -f $ROOTFS_PATH || $REFRESH == 1 ]]; then
     download_file "$ROOTFS_URL" "$ROOTFS_PATH"
   fi
@@ -346,10 +347,22 @@ verify_rootfs() {
   [[ $signer == "$ROOTFS_SIGNING_FINGERPRINT" ]] ||
     fail "rootfs was signed by ${signer:-unknown}, expected $ROOTFS_SIGNING_FINGERPRINT"
   log "Verified Arch Linux ARM rootfs signature"
+
+  # The rolling "latest" artifact is additionally pinned by digest so an
+  # upstream roll becomes an explicit, reviewed bump instead of a silent
+  # change of every image input. A local --rootfs override is already a
+  # deliberate choice, so the pin applies only to the downloaded artifact.
+  if [[ ${ROOTFS_PIN_APPLIES:-0} == 1 && -n ${ROOTFS_SHA256:-} ]]; then
+    local digest
+    digest=$(sha256sum "$ROOTFS_PATH" | awk '{print $1}')
+    [[ $digest == "$ROOTFS_SHA256" ]] || fail \
+      "rootfs digest $digest does not match the pinned ROOTFS_SHA256; upstream rolled — review the new rootfs, then update ROOTFS_SHA256 in sources.env"
+    log "Verified pinned rootfs digest"
+  fi
 }
 
 resolve_node_tarball() {
-  local checksums filename expected actual
+  local filename actual
 
   if [[ -n $NODE_TARBALL ]]; then
     [[ -f $NODE_TARBALL ]] || fail "Node.js archive not found: $NODE_TARBALL"
@@ -358,22 +371,20 @@ resolve_node_tarball() {
     return
   fi
 
-  checksums="$CACHE_DIR/node-SHASUMS256.txt"
-  if [[ ! -f $checksums || $REFRESH == 1 ]]; then
-    download_file "$NODE_DIST_URL/SHASUMS256.txt" "$checksums"
-  fi
-  read -r expected filename < <(
-    awk '$2 ~ /^node-v[0-9].*-linux-arm64\.tar\.gz$/ {print $1, $2; exit}' "$checksums"
-  )
-  [[ $expected =~ ^[0-9a-f]{64}$ && -n $filename ]] ||
-    fail "no linux-arm64 Node.js archive found in $NODE_DIST_URL/SHASUMS256.txt"
-
+  # The version and digest are pinned in sources.env: nodejs.org keeps every
+  # released version downloadable, so the input is immutable until both pins
+  # are bumped together.
+  [[ ${NODE_VERSION:-} =~ ^v[0-9][0-9.]*$ ]] ||
+    fail "NODE_VERSION in sources.env must name an exact Node.js release"
+  [[ ${NODE_SHA256:-} =~ ^[0-9a-f]{64}$ ]] ||
+    fail "NODE_SHA256 in sources.env must pin the archive digest"
+  filename="node-$NODE_VERSION-linux-arm64.tar.gz"
   NODE_TARBALL="$CACHE_DIR/$filename"
   if [[ ! -f $NODE_TARBALL || $REFRESH == 1 ]]; then
     download_file "$NODE_DIST_URL/$filename" "$NODE_TARBALL"
   fi
   actual=$(sha256sum "$NODE_TARBALL" | awk '{print $1}')
-  [[ $actual == "$expected" ]] || fail "Node.js archive checksum mismatch"
+  [[ $actual == "$NODE_SHA256" ]] || fail "Node.js archive checksum mismatch"
   log "Verified $filename"
 }
 

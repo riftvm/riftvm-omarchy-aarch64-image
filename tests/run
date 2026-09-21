@@ -1040,6 +1040,12 @@ source "$ROOT/sources.env"
   fail "RiftVM guest agent source is not pinned to a full commit"
 [[ $WL_CLIPBOARD_RS_REF =~ ^[0-9a-f]{40}$ ]] ||
   fail "wl-copy source is not pinned to a full commit"
+[[ $ROOTFS_SHA256 =~ ^[0-9a-f]{64}$ ]] ||
+  fail "the rolling rootfs artifact is not pinned by digest"
+[[ $NODE_VERSION =~ ^v[0-9][0-9.]*$ && $NODE_SHA256 =~ ^[0-9a-f]{64}$ ]] ||
+  fail "the Node.js provisioning archive is not pinned to a version and digest"
+[[ $NODE_DIST_URL == *"$NODE_VERSION"* ]] ||
+  fail "NODE_DIST_URL does not point at the pinned Node.js version"
 for field in riftvm_guest_agent_source_url riftvm_guest_agent_source_ref riftvm_guest_agent_sha256; do
   grep -Fq "printf '$field=%s\\n'" "$ROOT/bin/build-image" ||
     fail "image provenance does not record $field"
