@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Omarchy's background layer sometimes comes back from a theme change without a
+# committed buffer, leaving a black desktop that nothing redraws: the wallpaper
+# is static, the compositor has no newer frame to show, and no DRM mode changed,
+# so the RiftVM display watcher would never look.
+#
+# Ask it to look. The watcher owns the capture, the flatness test, the rate
+# limiting and the repair, so this only has to say when it is worth checking.
+# Failing here must never fail a theme change, hence the guard.
+
+request="${XDG_RUNTIME_DIR:-/tmp}/omarchy-riftvm-background-check.request"
+: >"$request" 2>/dev/null || true
