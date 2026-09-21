@@ -156,6 +156,21 @@ pass "all project and modified runtime scripts parse as Bash"
   if riftvm_load_owner_provisioning; then
     fail "symlinked RiftVM owner request was accepted"
   fi
+
+  # The wait loop must survive an invalid request: the first-boot unit is a
+  # oneshot without restart, so a fatal return would wedge setup across
+  # reboots while the bad file keeps failing every retry. The wait moves the
+  # rejected request aside and keeps polling for a corrected one.
+  rm -f "$request" "$request.rejected"
+  jq -n '{schemaVersion: 1, username: "root", password: "temporary-password",
+    keyboard: "us", hostname: "omarchy", timezone: "America/Los_Angeles"}' >"$request"
+  chmod 600 "$request"
+  RIFTVM_OWNER_WAIT_TICKS=2
+  status=0
+  riftvm_wait_owner_provisioning 2>/dev/null || status=$?
+  ((status == 1)) || fail "wait turned an invalid request into status $status instead of retrying"
+  [[ ! -e $request ]] || fail "invalid request was left in place to fail the next boot"
+  [[ -f $request.rejected ]] || fail "invalid request was not preserved for diagnosis"
   pass "RiftVM owner provisioning consumer validates, consumes, and rejects safely"
 )
 

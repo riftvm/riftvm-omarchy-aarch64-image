@@ -95,7 +95,17 @@ riftvm_wait_owner_provisioning() {
   for ((tick = 0; RIFTVM_OWNER_WAIT_TICKS == 0 || tick < RIFTVM_OWNER_WAIT_TICKS; tick++)); do
     riftvm_load_owner_provisioning && return 0
     status=$?
-    ((status == 1)) || return "$status"
+    if ((status == 2)); then
+      # An invalid request must not fail first-boot provisioning: the unit is
+      # a oneshot without restart, and the file would still be there on the
+      # next boot, so one bad request would wedge setup across reboots. Move
+      # it aside for diagnosis and keep waiting for a corrected request.
+      echo "riftvm-owner-provisioning: rejected an invalid request; waiting for a new one" >&2
+      mv -f -- "$RIFTVM_OWNER_REQUEST" "$RIFTVM_OWNER_REQUEST.rejected" 2>/dev/null ||
+        rm -f -- "$RIFTVM_OWNER_REQUEST"
+    elif ((status != 1)); then
+      return "$status"
+    fi
     sleep 0.25
   done
   return 1
