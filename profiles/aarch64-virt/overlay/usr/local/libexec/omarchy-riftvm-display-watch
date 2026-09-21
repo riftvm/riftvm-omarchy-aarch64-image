@@ -35,6 +35,20 @@ readonly REPAINT_MIN_INTERVAL="${OMARCHY_RIFTVM_REPAINT_MIN_INTERVAL:-5}"
 # longer than a shell IPC round trip.
 readonly THEME_SET_TIMEOUT="${OMARCHY_RIFTVM_THEME_SET_TIMEOUT:-60}"
 readonly LOG_FILE="${OMARCHY_RIFTVM_LOG:-$STATE_HOME/omarchy-riftvm-display-watch.log}"
+# A theme change can leave Omarchy's background layer without a committed
+# buffer, and it changes no DRM mode, so none of the checks above would ever
+# look. Omarchy's theme-set hook drops this file and the watcher then runs the
+# same verification it runs after a mode change.
+readonly CHECK_REQUEST="${OMARCHY_RIFTVM_CHECK_REQUEST:-${XDG_RUNTIME_DIR:-/tmp}/omarchy-riftvm-background-check.request}"
+# Let the theme's reveal finish before judging the desktop. A capture taken part
+# way through the transition is legitimately flat, and repairing then would
+# interrupt the animation it is meant to rescue.
+readonly REQUEST_SETTLE_TICKS="${OMARCHY_RIFTVM_REQUEST_SETTLE_TICKS:-3}"
+# Each repair attempt fixes most but not all of these, and a second attempt a
+# few seconds later usually takes. Bounded, so a desktop that is legitimately a
+# flat colour cannot put the watcher in a loop.
+readonly REQUEST_RETRY_LIMIT="${OMARCHY_RIFTVM_REQUEST_RETRY_LIMIT:-3}"
+readonly REQUEST_RETRY_TICKS="${OMARCHY_RIFTVM_REQUEST_RETRY_TICKS:-8}"
 
 now_seconds() {
   printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}"
@@ -314,12 +328,33 @@ verify_and_repair_background() {
       return 0
     fi
   fi
-  # Anything stronger is opt-in: reloading the shell's plugins or restarting the
-  # shell has left the reporter's session with no bar.
+  # The repaint fixes about half of these. Asking the shell to rescan its
+  # plugins rebuilds the background component and fixes the rest, and it is not
+  # the dangerous step the gate below was written for: measured across repeated
+  # rescans the bar and notification layers stay up, their pixels unchanged, and
+  # the shell keeps running. Restarting or relaunching the shell is the risk,
+  # and that stays opt-in.
+  if [[ -f $background ]] && shell_ipc shell rescanPlugins; then
+    log_debug "repaint did not take; asked the shell to rescan its plugins"
+    # A rescan rebuilds the component and loads the wallpaper again, and a slow
+    # load is the whole reason the layer came up empty, so give it room and look
+    # twice. Judging it once after a couple of seconds calls a working repair a
+    # failure.
+    for settle in 5 4; do
+      sleep "$settle" 8>&-
+      if ! background_needs_repair "$capture"; then
+        log_debug "Omarchy background repainted after a plugin rescan"
+        rm -f "$capture"
+        return 0
+      fi
+    done
+  fi
+  # Anything stronger is opt-in: restarting or relaunching the shell has left
+  # the reporter's session with no bar.
   if [[ ${OMARCHY_RIFTVM_BACKGROUND_REPAIR:-0} != 1 ]]; then
     log_debug "Omarchy background is still flat; further repair is off (OMARCHY_RIFTVM_BACKGROUND_REPAIR=1 enables it)"
     rm -f "$capture"
-    return 0
+    return 1
   fi
   log_debug "Omarchy background is flat in $flat captures; repairing"
   background=$(readlink -f "$STATE_HOME/omarchy/current/background" 2>/dev/null || true)
@@ -344,18 +379,11 @@ verify_and_repair_background() {
     # from the least invasive end, checking after each step, and never kill a
     # live shell: a shell that is killed on a host where the relaunch does not
     # take leaves the session with no bar and no way back but a reboot.
+    # The plugin rescan already ran above, unconditionally, so the opt-in path
+    # starts at the compositor.
     log_debug "wallpaper $background is set but the desktop is flat; rebuilding the layer"
-    if shell_ipc shell rescanPlugins; then
-      log_debug "asked the shell to rescan its plugins"
-    else
-      log_debug "the shell did not accept rescanPlugins"
-    fi
+    "$HYPRCTL" dispatch forcerendererreload >/dev/null 2>&1 || true
     sleep 1.5 8>&-
-    if background_needs_repair "$capture"; then
-      log_debug "still flat after rescanPlugins; asking the compositor to reload"
-      "$HYPRCTL" dispatch forcerendererreload >/dev/null 2>&1 || true
-      sleep 1.5 8>&-
-    fi
     if background_needs_repair "$capture"; then
       # Only when the shell is gone is a relaunch the answer, and it goes through
       # the compositor so the new instance inherits the session environment.
@@ -370,9 +398,10 @@ verify_and_repair_background() {
   fi
   if background_needs_repair "$capture"; then
     log_debug "Omarchy background is still not painted after the repair"
-  else
-    log_debug "Omarchy background repaired"
+    rm -f "$capture"
+    return 1
   fi
+  log_debug "Omarchy background repaired"
   rm -f "$capture"
 }
 
@@ -396,6 +425,8 @@ startup_background_check() {
 audit_ticks=10
 ticks_until_audit=0
 ticks_until_repaint=0
+ticks_until_requested_check=0
+requested_check_retries=0
 repaint_pending=0
 settle_ticks=0
 last_repaint_at=0
@@ -403,6 +434,27 @@ mode_switch_times=()
 previous=""
 watch_tick() {
   local current
+  if [[ -e $CHECK_REQUEST ]]; then
+    rm -f "$CHECK_REQUEST"
+    ticks_until_requested_check=$REQUEST_SETTLE_TICKS
+    requested_check_retries=0
+    log_debug "background check requested"
+  fi
+  if (( ticks_until_requested_check > 0 )); then
+    ticks_until_requested_check=$((ticks_until_requested_check - 1))
+    if (( ticks_until_requested_check == 0 )); then
+      if verify_and_repair_background; then
+        requested_check_retries=0
+      elif (( requested_check_retries < REQUEST_RETRY_LIMIT )); then
+        requested_check_retries=$((requested_check_retries + 1))
+        ticks_until_requested_check=$REQUEST_RETRY_TICKS
+        log_debug "background still flat; retry $requested_check_retries of $REQUEST_RETRY_LIMIT"
+      else
+        log_debug "background still flat after $REQUEST_RETRY_LIMIT retries; leaving it"
+        requested_check_retries=0
+      fi
+    fi
+  fi
   current=$(mode_signature)
   if [[ $current != "$previous" ]]; then
     log_debug "DRM signature changed: $current"

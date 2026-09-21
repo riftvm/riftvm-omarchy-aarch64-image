@@ -1176,6 +1176,28 @@ rm -rf -- "$invalid_fixture"
 pass "decoder rejects unsupported options"
 
 
+# The wallpaper after a theme change. Omarchy's background layer can come back
+# without a committed buffer, and a theme change moves no DRM mode, so the
+# watcher has to be told to look.
+hook="$ROOT/profiles/aarch64-virt/overlay/etc/skel/.config/omarchy/hooks/theme-set.d/50-riftvm-background-check"
+[[ -x $hook ]] || fail "new users get no theme-set background check"
+bash -n "$hook" || fail "the theme-set background hook does not parse"
+watch="$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/omarchy-riftvm-display-watch"
+hook_request=$(sed -n 's/.*\(omarchy-riftvm-background-check\.request\).*/\1/p' "$hook" | head -1)
+[[ -n $hook_request ]] || fail "the hook names no request file"
+grep -Fq "$hook_request" "$watch" ||
+  fail "the watcher does not read the request file the hook writes"
+grep -Fq 'verify_and_repair_background' "$watch" ||
+  fail "the watcher lost its background verification"
+grep -Fq 'shell rescanPlugins' "$watch" ||
+  fail "the watcher cannot rebuild a background layer the repaint did not fix"
+# The rescan must not sit behind the opt-in gate: it is the step that fixes the
+# half a plain repaint does not.
+awk '/rescanPlugins/ { rescan = NR } /OMARCHY_RIFTVM_BACKGROUND_REPAIR:-0/ { gate = NR }
+     END { exit !(rescan && gate && rescan < gate) }' "$watch" ||
+  fail "the plugin rescan is gated behind the opt-in repair switch"
+pass "a wallpaper lost to a theme change is detected and repaired"
+
 # Screen recording. gpu-screen-recorder needs a GPU vendor it recognises and a
 # hardware encoder; this machine has neither, so the overlay stands in for it.
 recorder="$ROOT/profiles/aarch64-virt/overlay/usr/bin/gpu-screen-recorder"
