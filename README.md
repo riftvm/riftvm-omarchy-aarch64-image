@@ -190,6 +190,9 @@ Package a local RiftVM Release layout:
   restarting the shell.
 - **Frame scheduling.** Hyprland's `debug:vfr` is left alone; see
   [demand rendering](docs/demand-rendering.md).
+- **Polling.** The watcher reads the DRM mode list once a second. Waiting for
+  DRM events instead is available as an opt-in that is not yet qualified; see
+  [display watcher polling](docs/display-watcher-polling.md).
 
 ## Tests
 

@@ -1,0 +1,227 @@
+#!/bin/bash
+# The display watcher's logging and its opt-in event-driven idle wait. Every
+# case loads the watcher in its own subshell because its settings are readonly.
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+set -E
+trap 'echo "FAIL: tests/test-event-wait line $LINENO: $BASH_COMMAND" >&2' ERR
+
+# `! command` does not trip errexit, so negative assertions go through this.
+refute() {
+  if "$@"; then
+    echo "FAIL: expected this to fail: $*" >&2
+    exit 1
+  fi
+}
+export OMARCHY_RIFTVM_DRM_ROOT="$fixture/drm"
+export OMARCHY_RIFTVM_HYPRCTL=hyprctl
+export OMARCHY_RIFTVM_SETTLE_TICKS=0
+export OMARCHY_RIFTVM_CHECK_REQUEST="$fixture/background-check.request"
+export OMARCHY_RIFTVM_LOG="$fixture/display-watch.log"
+mkdir -p "$fixture/drm/card0-Virtual-1"
+printf 'connected\n' >"$fixture/drm/card0-Virtual-1/status"
+printf '1280x720\n' >"$fixture/drm/card0-Virtual-1/modes"
+watch="$ROOT/profiles/aarch64-virt/overlay/usr/local/libexec/omarchy-riftvm-display-watch"
+load_watcher() {
+  # shellcheck source=/dev/null
+  source <(sed '/^install -d -m 0700/,$d' "$watch")
+}
+
+# The log line goes to the journal (stdout) and to the session file, without
+# forking a helper for every line.
+(
+  export OMARCHY_RIFTVM_LOG="$fixture/log-debug.log"
+  load_watcher
+  : >"$LOG_FILE"
+  tee() { echo 'log_debug forked tee' >&2; return 1; }
+  printed=$(log_debug 'first  line' 2>"$fixture/log-debug.err"; log_debug second)
+  [[ ! -s $fixture/log-debug.err ]]
+  [[ $printed == "$(<"$LOG_FILE")" ]]
+  [[ $(wc -l <"$LOG_FILE" | tr -d '[:space:]') == 2 ]]
+  [[ $(sed -n 1p "$LOG_FILE") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{4}\ first\ \ line$ ]]
+  [[ $(sed -n 2p "$LOG_FILE") == *' second' ]]
+)
+log_debug_forks() {
+  sed -n '/^log_debug()/,/^}/p' "$watch" | grep -Eq '\| *tee|\$\('
+}
+refute log_debug_forks
+echo 'PASS: log_debug writes the same line to stdout and the session log without forking'
+
+# Event-driven waiting is opt-in. Without the switch nothing is started and
+# the one-second poll loop is what runs.
+(
+  unset OMARCHY_RIFTVM_EVENT_DRIVEN
+  export OMARCHY_RIFTVM_UDEVADM="$fixture/must-not-run"
+  printf '#!/bin/bash\necho started >>%q\n' "$fixture/monitor-started" >"$fixture/must-not-run"
+  chmod +x "$fixture/must-not-run"
+  load_watcher
+  log_debug() { echo "unexpected log: $*" >&2; exit 1; }
+  refute start_drm_event_monitor
+  [[ -z $drm_event_fd && -z $drm_event_pid && ! -e $fixture/monitor-started ]]
+)
+[[ $(tail -6 "$watch") == 'if start_drm_event_monitor; then
+  run_event_driven_loop
+fi
+while sleep "$POLL_INTERVAL"; do
+  watch_tick
+done' ]]
+echo 'PASS: event-driven waiting is off by default and the poll loop is unchanged'
+
+# Invalid or unavailable event sources fall back to polling.
+(
+  export OMARCHY_RIFTVM_EVENT_DRIVEN=1 OMARCHY_RIFTVM_POLL_INTERVAL=0.5
+  load_watcher
+  log_debug() { :; }
+  refute start_drm_event_monitor
+)
+(
+  export OMARCHY_RIFTVM_EVENT_DRIVEN=1 OMARCHY_RIFTVM_EVENT_MAX_WAIT=0
+  load_watcher
+  log_debug() { :; }
+  refute start_drm_event_monitor
+)
+(
+  export OMARCHY_RIFTVM_EVENT_DRIVEN=1 OMARCHY_RIFTVM_UDEVADM="$fixture/no-such-udevadm"
+  load_watcher
+  log_debug() { :; }
+  refute start_drm_event_monitor
+  [[ -z $drm_event_fd ]]
+)
+echo 'PASS: event-driven waiting falls back to polling when it cannot run'
+
+# The scheduling: waits replace idle polls only, and the audit keeps its
+# wall-clock cadence. wait_for_drm_event is scripted; SECONDS is the clock.
+(
+  export OMARCHY_RIFTVM_EVENT_DRIVEN=1
+  load_watcher
+  log_debug() { :; }
+  event_max_wait_ticks=5
+  printf '1280x720\n' >"$fixture/drm/card0-Virtual-1/modes"
+  printf '[{"name":"Virtual-1","width":1280,"height":720}]\n' >"$fixture/monitors"
+  hyprctl() {
+    printf '%s\n' "$*" >>"$fixture/calls"
+    if [[ $* == '-j monitors all' ]]; then
+      cat "$fixture/monitors"
+    else
+      printf '[{"name":"Virtual-1","width":1920,"height":1080}]\n' >"$fixture/monitors"
+      printf 'ok\n'
+    fi
+  }
+  : >"$fixture/calls"
+  : >"$fixture/waits"
+  sleeps=0
+  sleep() {
+    [[ $1 == "$POLL_INTERVAL" ]] && sleeps=$((sleeps + 1))
+    return 0
+  }
+  script=()
+  wait_for_drm_event() {
+    local step=${script[0]:-lost}
+    script=("${script[@]:1}")
+    printf '%s %s\n' "$1" "$step" >>"$fixture/waits"
+    case $step in
+      timeout) SECONDS=$((SECONDS + $1)); return 2 ;;
+      event) return 0 ;;
+      resize) printf '1920x1080\n' >"$fixture/drm/card0-Virtual-1/modes"; return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+  previous=$(mode_signature)
+  watch_tick
+  [[ $ticks_until_audit -eq 10 && $(grep -c '^-j monitors all$' "$fixture/calls") -eq 1 ]]
+
+  # Ten idle seconds: two waits instead of ten polls, and the audit is due.
+  script=(timeout timeout)
+  run_event_driven_loop
+  [[ $(<"$fixture/waits") == $'5 timeout\n5 timeout\n5 lost' ]]
+  [[ $sleeps -eq 0 ]]
+  [[ $(grep -c '^-j monitors all$' "$fixture/calls") -eq 2 ]]
+  [[ $ticks_until_audit -eq 10 ]]
+  refute grep -q '^eval' "$fixture/calls"
+
+  # A wait never runs past the audit, and the last poll before it is a poll.
+  ticks_until_audit=3
+  : >"$fixture/waits"
+  script=(timeout)
+  run_event_driven_loop
+  [[ $(<"$fixture/waits") == $'3 timeout\n5 lost' ]]
+  [[ $(grep -c '^-j monitors all$' "$fixture/calls") -eq 3 ]]
+  ticks_until_audit=1
+  refute watcher_is_idle
+
+  # Uevents without a mode change cost a DRM read, not a compositor query.
+  ticks_until_audit=10
+  : >"$fixture/waits"
+  script=(event event)
+  run_event_driven_loop
+  [[ $ticks_until_audit -eq 8 ]]
+  [[ $(grep -c '^-j monitors all$' "$fixture/calls") -eq 3 ]]
+
+  # A resize is applied on the wake-up, and the follow-up runs on the normal
+  # poll interval until the compositor has confirmed it and been repainted.
+  repaint_background() { printf 'repaint\n' >>"$fixture/calls"; }
+  verify_and_repair_background() { :; }
+  : >"$fixture/waits"
+  script=(resize)
+  run_event_driven_loop
+  grep -Fxq 'eval hl.monitor({ output = "Virtual-1", mode = "1920x1080", position = "auto", scale = "auto" })' "$fixture/calls"
+  [[ $(grep -c '^eval' "$fixture/calls") -eq 1 ]]
+  [[ $(grep -c '^repaint$' "$fixture/calls") -eq 1 ]]
+  [[ $sleeps -eq $((REPAINT_TICKS)) ]]
+  [[ $(sed -n 1p "$fixture/waits") == '8 resize' || $(sed -n 1p "$fixture/waits") == '5 resize' ]]
+  [[ $(tail -1 "$fixture/waits") == *' lost' ]]
+
+  # Anything pending keeps the watcher on the poll interval.
+  ticks_until_audit=10
+  watcher_is_idle
+  for counter in settle_ticks ticks_until_repaint repaint_pending ticks_until_requested_check; do
+    printf -v "$counter" '%s' 1
+    refute watcher_is_idle
+    printf -v "$counter" '%s' 0
+  done
+  : >"$CHECK_REQUEST"
+  refute watcher_is_idle
+  rm -f "$CHECK_REQUEST"
+  refute grep -Eq 'vfr|hl.config|getoption' "$fixture/calls"
+)
+echo 'PASS: event-driven waiting keeps the audit cadence and polls while anything is pending'
+
+# The real monitor plumbing, against a fake udevadm.
+(
+  cat >"$fixture/udevadm" <<'MONITOR'
+#!/bin/bash
+[[ $* == 'monitor --udev --subsystem-match=drm' ]] || exit 64
+printf 'monitor will print the received events for:\n'
+printf 'UDEV - the event which udev sends out after rule processing\n\n'
+sleep 2
+printf 'UDEV  [10.000001] change   /devices/platform/virtio-gpu/drm/card0 (drm)\n'
+printf 'UDEV  [10.000002] change   /devices/platform/virtio-gpu/drm/card0 (drm)\n'
+sleep 2
+MONITOR
+  chmod +x "$fixture/udevadm"
+  export OMARCHY_RIFTVM_EVENT_DRIVEN=1 OMARCHY_RIFTVM_UDEVADM="$fixture/udevadm"
+  export OMARCHY_RIFTVM_EVENT_MAX_WAIT=7 OMARCHY_RIFTVM_POLL_INTERVAL=1
+  load_watcher
+  log_debug() { :; }
+  start_drm_event_monitor
+  [[ -n $drm_event_fd && -n $drm_event_pid && $event_max_wait_ticks -eq 7 ]]
+  status=0
+  wait_for_drm_event 5 || status=$?   # the banner
+  [[ $status -eq 0 ]]
+  status=0
+  wait_for_drm_event 1 || status=$?   # nothing yet
+  [[ $status -eq 2 ]]
+  status=0
+  wait_for_drm_event 5 || status=$?   # both uevents, as one wake-up
+  [[ $status -eq 0 ]]
+  status=0
+  wait_for_drm_event 1 || status=$?
+  [[ $status -eq 2 ]]
+  status=0
+  wait_for_drm_event 5 || status=$?   # the monitor exits
+  [[ $status -eq 1 ]]
+)
+echo 'PASS: the DRM event monitor reports events, timeouts, and its own exit'
