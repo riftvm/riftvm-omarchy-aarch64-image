@@ -1,0 +1,384 @@
+#!/bin/bash
+# Contracts for the persistent package cache, the build-time compression knob,
+# the builder tool provisioning, the package cache pruner, and the recorded
+# image digest. Nothing here mounts anything: mount and umount are recorded by
+# stubs.
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+pass() {
+  echo "PASS: $*"
+}
+
+# build-image derives its cache paths from its own location, so run a copy
+# from a disposable project root instead of writing into this checkout.
+project="$fixture/project"
+mkdir -p "$project/bin" "$project/lib"
+cp "$ROOT/bin/build-image" "$project/bin/build-image"
+cp "$ROOT/sources.env" "$project/sources.env"
+cp "$ROOT/lib/omarchy-source.sh" "$project/lib/omarchy-source.sh"
+cp -R "$ROOT/config" "$ROOT/profiles" "$project/"
+
+load_builder() {
+  # shellcheck source=../bin/build-image
+  source "$project/bin/build-image"
+  select_profile
+  MOUNT_DIR="$fixture/root"
+  calls="$fixture/calls"
+  rm -rf "$MOUNT_DIR" "$PROJECT_ROOT/build"
+  mkdir -p "$MOUNT_DIR/var/cache/pacman/pkg" "$MOUNT_DIR/etc/ssh" \
+    "$MOUNT_DIR/var/lib/systemd" "$MOUNT_DIR/root"
+  : >"$calls"
+  mount() { printf 'mount %s\n' "$*" >>"$calls"; }
+  umount() { printf 'umount %s\n' "$*" >>"$calls"; }
+  target_chroot() {
+    [[ $1 != getent ]] || return 1
+    printf 'chroot %s\n' "$*" >>"$calls"
+  }
+  retry_target_pacman() { printf 'pacman %s\n' "${*:1:3}" >>"$calls"; }
+  mask_target_boot_hooks() { :; }
+  unmask_target_boot_hooks() { :; }
+  resolve_official_packages() { printf 'base\n'; }
+  log() { :; }
+  warn() { printf 'warn %s\n' "$*" >>"$calls"; }
+  OMARCHY_SOURCE_DIR="$fixture/source"
+}
+
+(
+  unset OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE
+  load_builder
+  [[ $PACMAN_CACHE_DIR == "$project/build/cache/pacman-aarch64" ]] ||
+    fail "the fixture builder does not use a disposable package cache"
+
+  install_packages
+  ((PACKAGE_CACHE_MOUNTED == 1)) ||
+    fail "the package cache is unmounted before the later package downloads"
+  grep -Fxq "mount --bind $PACMAN_CACHE_DIR $MOUNT_DIR/var/cache/pacman/pkg" "$calls" ||
+    fail "the host package cache is not bind-mounted over the target cache"
+  ! grep -q '^umount' "$calls" ||
+    fail "install_packages unmounted the package cache in assembly scope"
+
+  # Identity sanitisation must detach the cache before pacman cleans it.
+  printf 'cached\n' >"$PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst"
+  : >"$calls"
+  sanitize_factory_identity
+  ((PACKAGE_CACHE_MOUNTED == 0)) || fail "pacman -Scc ran with the host cache mounted"
+  unmount_line=$(grep -n "^umount $MOUNT_DIR/var/cache/pacman/pkg$" "$calls" | cut -d: -f1)
+  clean_line=$(grep -n '^chroot pacman -Scc --noconfirm$' "$calls" | cut -d: -f1)
+  [[ -n $unmount_line && -n $clean_line && $unmount_line -lt $clean_line ]] ||
+    fail "the package cache is not unmounted before pacman -Scc"
+  [[ -f $PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst ]] ||
+    fail "image cleanup removed a package from the host cache"
+
+  # A second call is a no-op, so main() and the sanitiser can both ask.
+  : >"$calls"
+  unmount_package_cache
+  [[ ! -s $calls ]] || fail "an unmounted package cache was unmounted again"
+)
+pass "the package cache stays mounted through assembly and is detached before pacman -Scc"
+
+(
+  load_builder
+  # Emulate a bind mount that survived: the target path is the host cache.
+  mkdir -p "$PACMAN_CACHE_DIR"
+  rmdir "$MOUNT_DIR/var/cache/pacman/pkg"
+  ln -s "$PACMAN_CACHE_DIR" "$MOUNT_DIR/var/cache/pacman/pkg"
+  printf 'cached\n' >"$PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst"
+  if (sanitize_factory_identity) >/dev/null 2>&1; then
+    fail "pacman -Scc was allowed to run against the host package cache"
+  fi
+  ! grep -q 'pacman -Scc' "$calls" ||
+    fail "pacman -Scc ran against the host package cache"
+  [[ -f $PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst ]] ||
+    fail "the host package cache lost a package"
+)
+pass "pacman -Scc refuses to run while the target cache is still the host cache"
+
+(
+  load_builder
+  umount() {
+    printf 'umount %s\n' "$*" >>"$calls"
+    [[ $1 == -l ]]
+  }
+  PACKAGE_CACHE_MOUNTED=1
+  unmount_package_cache
+  ((PACKAGE_CACHE_MOUNTED == 0)) || fail "a busy package cache stayed marked as mounted"
+  [[ $(grep -c '^umount' "$calls") -eq 2 ]] &&
+    grep -Fxq "umount -l $MOUNT_DIR/var/cache/pacman/pkg" "$calls" ||
+    fail "a busy package cache is not detached lazily"
+
+  umount() { return 1; }
+  PACKAGE_CACHE_MOUNTED=1
+  if (unmount_package_cache) >/dev/null 2>&1; then
+    fail "a package cache that cannot be detached was reported as unmounted"
+  fi
+)
+pass "a busy package cache is detached lazily and a failed detach stops the build"
+
+(
+  export OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=install
+  load_builder
+  install_packages
+  ((PACKAGE_CACHE_MOUNTED == 0)) ||
+    fail "install scope left the package cache mounted after install_packages"
+  grep -Fxq "umount $MOUNT_DIR/var/cache/pacman/pkg" "$calls" ||
+    fail "install scope did not unmount the package cache"
+
+  OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=forever
+  if (package_cache_scope) >/dev/null 2>&1; then
+    fail "an unknown package cache scope was accepted"
+  fi
+)
+pass "OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=install restores the install-only cache mount"
+
+main_line() {
+  awk -v step="  $1" '/^main\(\) \{$/ { inside = 1 } inside && $0 == step { print NR }' \
+    "$ROOT/bin/build-image"
+}
+install_line=$(main_line install_packages)
+apply_line=$(main_line apply_omarchy_system)
+remove_line=$(main_line remove_profile_packages)
+unmount_line=$(main_line unmount_package_cache)
+sanitize_line=$(main_line sanitize_factory_identity)
+reclaim_line=$(main_line reclaim_packaging_space)
+[[ -n $install_line && -n $apply_line && -n $remove_line && -n $unmount_line &&
+  -n $sanitize_line && -n $reclaim_line ]] ||
+  fail "the image build no longer has the expected assembly steps"
+((install_line < apply_line && apply_line < remove_line && remove_line < unmount_line &&
+  unmount_line < sanitize_line && sanitize_line < reclaim_line)) ||
+  fail "the package cache is not unmounted between package removal and image cleanup"
+if sed -n '/^cleanup()/,/^}/p' "$ROOT/bin/build-image" | grep -Eq 'rm -rf|find .*-delete.*MOUNT_DIR'; then
+  fail "cleanup could delete below a mount point that may still hold the host cache"
+fi
+pass "the image build detaches the package cache after the last package step"
+
+(
+  load_builder
+  mkdir -p "$PACMAN_CACHE_DIR" "$CACHE_DIR/sources" "$CACHE_DIR/omarchy-pkgs-1" \
+    "$CACHE_DIR/prebuilt-packages"
+  : >"$PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst"
+  : >"$CACHE_DIR/rootfs.tar.gz"
+
+  OMARCHY_IMAGE_LOW_DISK=0 OMARCHY_IMAGE_KEEP_PACKAGE_CACHE=0 reclaim_packaging_space
+  [[ -d $PACMAN_CACHE_DIR && -d $CACHE_DIR/sources ]] ||
+    fail "caches were reclaimed outside low-disk mode"
+
+  OMARCHY_IMAGE_LOW_DISK=1 OMARCHY_IMAGE_KEEP_PACKAGE_CACHE=1 reclaim_packaging_space
+  [[ -f $PACMAN_CACHE_DIR/example-1-1-aarch64.pkg.tar.zst ]] ||
+    fail "low-disk mode deleted the package cache it was asked to keep"
+  [[ ! -e $CACHE_DIR/sources && ! -e $CACHE_DIR/omarchy-pkgs-1 &&
+    ! -e $CACHE_DIR/prebuilt-packages ]] ||
+    fail "low-disk mode kept transient caches other than the package cache"
+  [[ -f $CACHE_DIR/rootfs.tar.gz ]] || fail "low-disk mode deleted a verified input"
+
+  mkdir -p "$CACHE_DIR/sources"
+  OMARCHY_IMAGE_LOW_DISK=1 OMARCHY_IMAGE_KEEP_PACKAGE_CACHE=0 reclaim_packaging_space
+  [[ ! -e $PACMAN_CACHE_DIR && ! -e $CACHE_DIR/sources ]] ||
+    fail "low-disk mode no longer reclaims the package cache by default"
+)
+pass "low-disk mode reclaims the package cache unless a runner asks to keep it"
+
+(
+  unset OMARCHY_IMAGE_BUILD_COMPRESSION
+  load_builder
+  [[ $BUILD_COMPRESSION == compress=zstd:3 ]] ||
+    fail "the default build-time compression changed: $BUILD_COMPRESSION"
+  validate_build_compression
+  for option in compress=zstd compress=zstd:1 compress-force=zstd:15 compress-force=zstd; do
+    BUILD_COMPRESSION=$option
+    validate_build_compression || fail "rejected build compression $option"
+  done
+  for option in '' zstd compress=zstd:0 compress=zstd:16 compress=lzo compress-force=zlib:9 \
+    'compress=zstd:3,nodatacow' 'compress=zstd:3 ' none; do
+    BUILD_COMPRESSION=$option
+    if (validate_build_compression) >/dev/null 2>&1; then
+      fail "accepted build compression '$option'"
+    fi
+  done
+
+  LOOP_DEVICE=/dev/loop-fixture
+  blkid() {
+    case $* in
+      *p2) printf 'root-uuid\n' ;;
+      *) printf 'esp-uuid\n' ;;
+    esac
+  }
+  BUILD_COMPRESSION=compress-force=zstd:15
+  mkdir -p "$MOUNT_DIR/etc"
+  write_fstab
+  [[ $(grep -c 'btrfs' "$MOUNT_DIR/etc/fstab") -eq 4 &&
+    $(grep -c 'rw,noatime,compress=zstd:3,subvol=@' "$MOUNT_DIR/etc/fstab") -eq 4 ]] ||
+    fail "the build-time compression leaked into the installed system's fstab"
+)
+[[ $(grep -c 'mount -o "noatime,$BUILD_COMPRESSION,subvol=@' "$ROOT/bin/build-image") -eq 4 ]] ||
+  fail "a build-time subvolume mount ignores the compression knob"
+for knob in OMARCHY_IMAGE_KEEP_PACKAGE_CACHE OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE \
+  OMARCHY_IMAGE_BUILD_COMPRESSION OMARCHY_IMAGE_BUILDER_FULL_UPGRADE; do
+  grep -Fq -- "--env \"$knob=\${$knob:-" "$ROOT/bin/build-image-container" ||
+    fail "the build container does not receive $knob"
+done
+grep -Fq -- '--env "OMARCHY_IMAGE_BUILD_COMPRESSION=${OMARCHY_IMAGE_BUILD_COMPRESSION:-compress=zstd:3}"' \
+  "$ROOT/bin/build-image-container" ||
+  fail "the build container changes the default build-time compression"
+pass "build-time compression is a validated knob and the installed fstab keeps zstd:3"
+
+builder_case() {
+  # Arguments: tools present (0/1), tools run after: -S, -Sy (0/1), pacman -S
+  # status, pacman -Sy status.
+  tools_present=$1 works_after_s=$2 works_after_sy=$3 status_s=$4 status_sy=$5
+  pacman_calls="$fixture/pacman-calls"
+  : >"$pacman_calls"
+  # shellcheck source=../lib/builder-tools.sh
+  source "$ROOT/lib/builder-tools.sh"
+  tools_run=$tools_present
+  pacman() {
+    printf '%s\n' "$*" >>"$pacman_calls"
+    case $1 in
+      -S) tools_run=$works_after_s; return "$status_s" ;;
+      -Sy) tools_run=$works_after_sy; return "$status_sy" ;;
+      -Syu) tools_run=1 ;;
+    esac
+  }
+  builder_tools_work() { ((tools_run == 1)); }
+  ensure_builder_tools >/dev/null 2>&1
+}
+readonly tool_packages='--needed --noconfirm btrfs-progs dosfstools parted'
+(
+  unset OMARCHY_IMAGE_BUILDER_FULL_UPGRADE
+  builder_case 1 1 1 0 0
+  [[ ! -s $pacman_calls ]] || fail "installed builder tools were installed again"
+
+  builder_case 0 1 1 0 0
+  [[ $(<"$pacman_calls") == "-S $tool_packages" ]] ||
+    fail "missing builder tools were not installed from the image's own database"
+
+  builder_case 0 0 1 1 0
+  [[ $(<"$pacman_calls") == "-S $tool_packages"$'\n'"-Sy $tool_packages" ]] ||
+    fail "a stale package database did not fall back to a refresh for the tools"
+
+  builder_case 0 1 0 0 0
+  [[ $(<"$pacman_calls") == "-S $tool_packages" ]] || fail "working tools were reinstalled"
+
+  builder_case 0 0 0 1 0
+  [[ $(tail -1 "$pacman_calls") == "-Syu $tool_packages" &&
+    $(wc -l <"$pacman_calls" | tr -d '[:space:]') == 3 ]] ||
+    fail "tools that do not run after a partial install did not upgrade the builder"
+
+  builder_case 0 0 0 1 1
+  [[ $(tail -1 "$pacman_calls") == "-Syu $tool_packages" ]] ||
+    fail "a failed refresh did not fall back to the full upgrade"
+
+  export OMARCHY_IMAGE_BUILDER_FULL_UPGRADE=1
+  builder_case 1 1 1 0 0
+  [[ $(<"$pacman_calls") == "-Syu $tool_packages" ]] ||
+    fail "OMARCHY_IMAGE_BUILDER_FULL_UPGRADE=1 did not run the full upgrade"
+)
+(
+  # The real probe must notice a tool that is installed but does not run.
+  # shellcheck source=../lib/builder-tools.sh
+  source "$ROOT/lib/builder-tools.sh"
+  btrfs() { :; }
+  mkfs.btrfs() { :; }
+  mkfs.fat() { :; }
+  parted() { :; }
+  builder_tools_work || fail "working builder tools were reported as broken"
+  parted() { return 127; }
+  ! builder_tools_work || fail "a builder tool that does not run was accepted"
+)
+grep -Fq 'source /project/lib/builder-tools.sh' "$ROOT/bin/build-image-container" &&
+  grep -Fq 'ensure_builder_tools' "$ROOT/bin/build-image-container" ||
+  fail "the build container does not provision its image tools"
+if grep -Fq 'pacman -Syu' "$ROOT/bin/build-image-container"; then
+  fail "the build container upgrades the whole builder on every build"
+fi
+bash -n "$ROOT/lib/builder-tools.sh"
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck "$ROOT/lib/builder-tools.sh"
+fi
+pass "the builder installs its image tools without a full upgrade and falls back safely"
+
+(
+  cache="$fixture/package-cache"
+  mkdir -p "$cache"
+  stamp() { touch -d "$1" "$cache/$2"; }
+  stamp '2026-01-01' linux-aarch64-6.1.0-1-aarch64.pkg.tar.xz
+  stamp '2026-01-01' linux-aarch64-6.1.0-1-aarch64.pkg.tar.xz.sig
+  stamp '2026-02-01' linux-aarch64-6.2.0-1-aarch64.pkg.tar.xz
+  stamp '2026-02-01' linux-aarch64-6.2.0-1-aarch64.pkg.tar.xz.sig
+  stamp '2026-01-01' linux-aarch64-headers-6.1.0-1-aarch64.pkg.tar.xz
+  stamp '2026-03-01' ttf-ia-writer-20181225-1-any.pkg.tar.zst
+  stamp '2026-03-01' yay-1:13.0.1-1-aarch64.pkg.tar.zst
+  stamp '2026-01-01' yay-1:12.0.0-1-aarch64.pkg.tar.zst
+  stamp '2026-03-01' interrupted-1-1-aarch64.pkg.tar.zst.part
+  stamp '2026-03-01' notes.txt
+
+  "$ROOT/bin/prune-package-cache" "$cache" >/dev/null
+  [[ $(find "$cache" -type f -printf '%f\n' | sort | tr '\n' ' ') == \
+    "linux-aarch64-6.2.0-1-aarch64.pkg.tar.xz linux-aarch64-6.2.0-1-aarch64.pkg.tar.xz.sig linux-aarch64-headers-6.1.0-1-aarch64.pkg.tar.xz notes.txt ttf-ia-writer-20181225-1-any.pkg.tar.zst yay-1:13.0.1-1-aarch64.pkg.tar.zst " ]] ||
+    fail "package cache pruning kept: $(find "$cache" -type f -printf '%f ' | sort)"
+  "$ROOT/bin/prune-package-cache" "$fixture/no-such-cache" >/dev/null ||
+    fail "pruning a missing package cache failed"
+)
+pass "package cache pruning keeps the newest file of every package"
+
+(
+  release="$fixture/release-digest"
+  mkdir -p "$release"
+  image="$release/fixture.raw"
+  head -c 300000 /dev/urandom >"$image"
+  actual=$(sha256sum "$image" | awk '{print $1}')
+  recorded=$(printf 'recorded by the build' | sha256sum | awk '{print $1}')
+  packaged_digest() {
+    OMARCHY_RIFTVM_PART_SIZE_MIB=1 "$ROOT/bin/package-riftvm-release" \
+      --tag fixture-1 --image "$image" --output "$release/assets" >/dev/null 2>&1
+    jq -r '.disk.sha256' "$release/assets/riftvm-release-manifest.json"
+  }
+
+  [[ $(packaged_digest) == "$actual" ]] ||
+    fail "an image without a recorded digest was not hashed"
+
+  # The fixture records a digest that is not the image's, which is the only
+  # way to see that the packager read it instead of hashing.
+  printf '%s  fixture.raw\n' "$recorded" >"$image.sha256"
+  touch -d '2026-01-01 00:00:00' "$image"
+  touch -d '2026-01-01 00:00:05' "$image.sha256"
+  [[ $(packaged_digest) == "$recorded" ]] ||
+    fail "the digest recorded by the build was computed again"
+  [[ $(OMARCHY_RIFTVM_REHASH_IMAGE=1 packaged_digest) == "$actual" ]] ||
+    fail "OMARCHY_RIFTVM_REHASH_IMAGE=1 did not hash the image"
+
+  touch -d '2026-01-01 00:00:10' "$image"
+  [[ $(packaged_digest) == "$actual" ]] ||
+    fail "a digest older than the image was trusted"
+
+  touch -d '2026-01-01 00:00:20' "$image.sha256"
+  printf '%s  another.raw\n' "$recorded" >"$image.sha256"
+  [[ $(packaged_digest) == "$actual" ]] ||
+    fail "a digest recorded for another file was trusted"
+  printf 'not-a-digest  fixture.raw\n' >"$image.sha256"
+  [[ $(packaged_digest) == "$actual" ]] || fail "a malformed digest was trusted"
+  : >"$image.sha256"
+  [[ $(packaged_digest) == "$actual" ]] || fail "an empty digest file was trusted"
+  rm -f "$image.sha256"
+  printf '%s  fixture.raw\n' "$recorded" >"$release/elsewhere.sha256"
+  ln -s "$release/elsewhere.sha256" "$image.sha256"
+  [[ $(packaged_digest) == "$actual" ]] || fail "a symlinked digest file was trusted"
+)
+pass "release packaging reuses only a fresh digest recorded for the same image"
+
+workflow="$ROOT/.github/workflows/release-image.yml"
+grep -Fq 'path: build/cache/pacman-aarch64' "$workflow" &&
+  grep -Fq "hashFiles('sources.env', 'config/omarchy-packages.aarch64', 'profiles/**')" "$workflow" &&
+  grep -Fq "OMARCHY_IMAGE_KEEP_PACKAGE_CACHE: '1'" "$workflow" ||
+  fail "the release workflow does not carry the package cache between builds"
+if grep -Fq 'cache_week' "$workflow"; then
+  fail "digest-pinned inputs are still re-downloaded every week"
+fi
+pass "the release workflow keeps verified inputs and target packages between builds"
