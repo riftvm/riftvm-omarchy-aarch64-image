@@ -47,6 +47,13 @@ MANIFEST_STAGE_DIR=""
 BUILD_COMPLETE=0
 PACKAGE_CACHE_MOUNTED=0
 
+# Build-time Btrfs compression for the image's own subvolume mounts. It only
+# decides how the factory extents are written; the installed system keeps
+# mounting with the zstd:3 options in its fstab. Only zstd is accepted because
+# that is the algorithm the guest kernel is already required to read.
+readonly DEFAULT_BUILD_COMPRESSION='compress=zstd:3'
+BUILD_COMPRESSION=${OMARCHY_IMAGE_BUILD_COMPRESSION:-$DEFAULT_BUILD_COMPRESSION}
+
 readonly -a DEFERRED_BOOT_HOOKS=(
   60-mkinitcpio-remove.hook
   60-limine-mkinitcpio-remove-pre.hook
@@ -650,6 +657,14 @@ partition_image() {
   mkfs.btrfs -f -L "$ROOT_LABEL" "${LOOP_DEVICE}p2"
 }
 
+validate_build_compression() {
+  [[ $BUILD_COMPRESSION =~ ^compress(-force)?=zstd(:([1-9]|1[0-5]))?$ ]] ||
+    fail "OMARCHY_IMAGE_BUILD_COMPRESSION must be compress=zstd[:1-15] or compress-force=zstd[:1-15] (got: $BUILD_COMPRESSION)"
+  if [[ $BUILD_COMPRESSION != "$DEFAULT_BUILD_COMPRESSION" ]]; then
+    log "Writing the image with Btrfs build-time option $BUILD_COMPRESSION"
+  fi
+}
+
 mount_layout() {
   local top boot_stage
   MOUNT_DIR=$(mktemp -d /tmp/omarchy-aarch64-image.XXXXXX)
@@ -664,11 +679,11 @@ mount_layout() {
   umount "$top"
   rmdir "$top"
 
-  mount -o noatime,compress=zstd:3,subvol=@ "${LOOP_DEVICE}p2" "$MOUNT_DIR"
+  mount -o "noatime,$BUILD_COMPRESSION,subvol=@" "${LOOP_DEVICE}p2" "$MOUNT_DIR"
   mkdir -p "$MOUNT_DIR/home" "$MOUNT_DIR/var/log" "$MOUNT_DIR/var/cache/pacman/pkg"
-  mount -o noatime,compress=zstd:3,subvol=@home "${LOOP_DEVICE}p2" "$MOUNT_DIR/home"
-  mount -o noatime,compress=zstd:3,subvol=@log "${LOOP_DEVICE}p2" "$MOUNT_DIR/var/log"
-  mount -o noatime,compress=zstd:3,subvol=@pkg "${LOOP_DEVICE}p2" "$MOUNT_DIR/var/cache/pacman/pkg"
+  mount -o "noatime,$BUILD_COMPRESSION,subvol=@home" "${LOOP_DEVICE}p2" "$MOUNT_DIR/home"
+  mount -o "noatime,$BUILD_COMPRESSION,subvol=@log" "${LOOP_DEVICE}p2" "$MOUNT_DIR/var/log"
+  mount -o "noatime,$BUILD_COMPRESSION,subvol=@pkg" "${LOOP_DEVICE}p2" "$MOUNT_DIR/var/cache/pacman/pkg"
 
   log "Extracting Arch Linux ARM root filesystem"
   bsdtar --numeric-owner --acls --xattrs -xpf "$ROOTFS_PATH" -C "$MOUNT_DIR"
@@ -779,6 +794,12 @@ assert_target_boot_hooks_restored() {
     fail "future kernel updates have no mkinitcpio install hook"
 }
 
+# The persistent host package cache is bind-mounted on top of the image's own
+# @pkg subvolume mount. While it is stacked there, every package pacman
+# downloads inside the chroot lands in build/cache/pacman-aarch64 instead of
+# inside the image; unmounting it reveals the (empty) @pkg subvolume again.
+# A failed build leaves the bind mount to cleanup(), whose recursive unmount
+# of $MOUNT_DIR detaches both layers and never deletes below a mount point.
 mount_package_cache() {
   mkdir -p "$PACMAN_CACHE_DIR" "$MOUNT_DIR/var/cache/pacman/pkg"
   mount --bind "$PACMAN_CACHE_DIR" "$MOUNT_DIR/var/cache/pacman/pkg"
@@ -786,9 +807,38 @@ mount_package_cache() {
 }
 
 unmount_package_cache() {
+  local target="$MOUNT_DIR/var/cache/pacman/pkg"
+
   ((PACKAGE_CACHE_MOUNTED == 1)) || return 0
-  umount "$MOUNT_DIR/var/cache/pacman/pkg"
+  if ! umount "$target"; then
+    # A helper left behind by a package hook can keep the bind mount busy.
+    # Detaching it lazily still removes it from the target tree immediately,
+    # and a bind mount holds no data of its own, so nothing is lost.
+    warn "package cache is busy; lazily detaching it from the target"
+    umount -l "$target" ||
+      fail "failed to detach the host package cache from the target"
+  fi
   PACKAGE_CACHE_MOUNTED=0
+}
+
+package_cache_scope() {
+  local scope=${OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE:-assembly}
+
+  case $scope in
+    assembly | install) printf '%s\n' "$scope" ;;
+    *) fail "OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE must be assembly or install (got: $scope)" ;;
+  esac
+}
+
+# pacman -Scc empties whatever is mounted at the target's package cache path.
+# Refuse to run it while that path is still the persistent host cache.
+require_target_package_cache() {
+  local target="$MOUNT_DIR/var/cache/pacman/pkg"
+
+  unmount_package_cache
+  if [[ -d $PACMAN_CACHE_DIR && $target -ef $PACMAN_CACHE_DIR ]]; then
+    fail "the host package cache is still mounted in the target; refusing to clean it"
+  fi
 }
 
 retry_target_pacman() {
@@ -909,7 +959,13 @@ install_packages() {
     retry_target_pacman -S --needed --noconfirm "${repo_install_packages[@]}"
     unmask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
   fi
-  unmount_package_cache
+  # By default the cache stays mounted for the later assembly steps that also
+  # download packages (omarchy-apply-system); main() unmounts it before the
+  # image is cleaned. OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=install restores the
+  # earlier behaviour of covering this function only.
+  if [[ $(package_cache_scope) == install ]]; then
+    unmount_package_cache
+  fi
 }
 
 configure_base_system() {
@@ -1206,6 +1262,7 @@ sanitize_factory_identity() {
   : >"$MOUNT_DIR/etc/machine-id"
   ln -sfn /run/systemd/resolve/stub-resolv.conf "$MOUNT_DIR/etc/resolv.conf"
   rm -rf -- "$MOUNT_DIR/root/.gnupg" "$MOUNT_DIR/root/.cache"
+  require_target_package_cache
   target_chroot pacman -Scc --noconfirm
 }
 
@@ -1434,7 +1491,15 @@ reclaim_packaging_space() {
   [[ ${OMARCHY_IMAGE_LOW_DISK:-0} == 1 ]] || return 0
 
   log "Reclaiming transient caches before sparse raw packaging"
-  rm -rf -- "$PACMAN_CACHE_DIR" "$CACHE_DIR/sources"
+  # A runner that saves the package cache after the build (actions/cache)
+  # keeps it; everything else transient is still reclaimed.
+  if [[ ${OMARCHY_IMAGE_KEEP_PACKAGE_CACHE:-0} == 1 ]]; then
+    log "Keeping the persistent package cache for the next build"
+  else
+    unmount_package_cache
+    rm -rf -- "$PACMAN_CACHE_DIR"
+  fi
+  rm -rf -- "$CACHE_DIR/sources"
   find "$CACHE_DIR" -mindepth 1 -maxdepth 1 -type d \
     \( -name 'omarchy-pkgs-*' -o -name prebuilt-packages \) \
     -exec rm -rf -- {} +
@@ -1553,6 +1618,8 @@ main() {
   done
   resolve_omarchy_source
   validate_configuration
+  validate_build_compression
+  package_cache_scope >/dev/null
   validate_outputs
 
   mkdir -p "$CACHE_DIR"
@@ -1581,6 +1648,7 @@ main() {
   write_omarchy_repository_configuration
   stage_first_boot_provisioning
   remove_profile_packages
+  unmount_package_cache
   configure_limine
   sanitize_factory_identity
   write_image_provenance

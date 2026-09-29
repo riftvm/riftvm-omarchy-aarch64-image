@@ -106,6 +106,51 @@ report either way says what the screen looked like before and after.
 flat theme-coloured screen must be reported as missing, a structured image must
 not, and a disabled or unavailable check must never claim the wallpaper is fine.
 
+## Opt-in: waiting for DRM events while idle
+
+The one-second poll stays the default. `OMARCHY_RIFTVM_EVENT_DRIVEN=1` turns on
+an alternative that is **not qualified in a real guest yet** and must not
+become the default before it is.
+
+With the switch on, the watcher starts
+`udevadm monitor --udev --subsystem-match=drm` and, while nothing is pending,
+waits for a line from it instead of sleeping for one poll interval. A wait ends
+after `OMARCHY_RIFTVM_EVENT_MAX_WAIT` seconds (default 5) at the latest, so a
+poll still happens at least that often: a resize that arrives without a uevent
+is noticed up to five seconds later, never missed.
+
+The counters that implement the settle window, the repaint delay, the
+background-check retries and the audit are all counted in polls. Events
+therefore never replace a poll while any of them is running: the watcher is
+idle only when the settle, repaint and requested-check counters are at zero, no
+mode request is pending, no check request file exists and the audit is more
+than one poll away. Anything else runs on the normal poll interval, so a burst
+of uevents cannot shorten a settle window. A wait never extends past the next
+audit, and a wait that timed out credits the polls it replaced, which keeps the
+audit at about ten seconds of wall-clock time.
+
+The watcher falls back to the polling loop, and logs why, when
+`OMARCHY_RIFTVM_POLL_INTERVAL` or `OMARCHY_RIFTVM_EVENT_MAX_WAIT` is not a
+whole number of seconds, when `udevadm` is missing, or when the monitor exits.
+
+Known differences from polling, all limited to idle periods:
+
+- A background check requested through the request file (a theme change) is
+  picked up after at most `OMARCHY_RIFTVM_EVENT_MAX_WAIT` seconds instead of one.
+- The watcher keeps one `udevadm monitor` child process for its lifetime.
+
+`tests/test-event-wait` covers the default staying off, the fallbacks, the
+idle rule, the audit cadence, a resize delivered by an event, and the monitor
+plumbing against a fake `udevadm`. It cannot show that virtio-gpu raises a
+uevent for every host resize, nor that `udevadm monitor` delivers it promptly
+through a pipe; both need a disposable guest. Qualification should repeat the
+resize, compositor-reload and theme-change checks above with the switch on and
+compare wake-ups (for example with `powertop` or `perf stat`) against polling.
+
+The same change made `log_debug` write its line with two `printf` calls instead
+of piping it through `tee`, which forked a process for every log line. The
+output on stdout and in the session log is unchanged.
+
 ## Remaining performance work assessment
 
 | Work | Feasibility and next evidence |
@@ -115,7 +160,7 @@ not, and a disabled or unavailable check must never claim the wallpaper is fine.
 | Longer controlled idle A/B and energy | Feasible measurement work; requires stable visibility/lock state and separate energy data. |
 | Broad GPU/application compatibility | Ongoing matrix, not a single bounded fix. |
 | Refresh-aware presentation and 120 Hz | Requires display support and measured input-to-photon latency before design changes. |
-| Watcher polling overhead | This PR reduces idle compositor queries; one-second DRM polling remains. Live qualification is pending. |
+| Watcher polling overhead | This PR reduces idle compositor queries; one-second DRM polling remains the default. Event-driven idle waiting exists as an opt-in and awaits live qualification. |
 | Matched Try Omarchy comparison | Requires both environments with matched resources, resolution and workloads. |
 
 ## Native follow-up qualification

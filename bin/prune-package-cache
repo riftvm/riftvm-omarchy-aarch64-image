@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Keep only the newest file of every package in a pacman package cache.
+#
+# The cache is carried from one image build to the next, and each build adds
+# the packages that were updated since. Without pruning it would keep every
+# version it has ever seen. Deleting a file here can only cost a later
+# download: pacman fetches whatever is missing.
+
+set -euo pipefail
+
+fail() {
+  printf '\033[31mError:\033[0m %s\n' "$*" >&2
+  exit 1
+}
+
+(($# == 1)) || fail "usage: prune-package-cache CACHE_DIRECTORY"
+readonly CACHE=$1
+[[ -d $CACHE ]] || {
+  printf 'No package cache at %s; nothing to prune.\n' "$CACHE"
+  exit 0
+}
+
+declare -A newest=()
+removed=0
+kept=0
+
+# Newest first, so the first file seen for a package is the one to keep.
+# Package files are named <name>-<version>-<release>-<architecture>.pkg.tar.*
+# and the name itself may contain dashes, so strip the last three fields.
+while IFS= read -r -d '' entry; do
+  path=${entry#* }
+  file=${path##*/}
+  [[ $file =~ ^(.+)-[^-]+-[^-]+-[^-]+\.pkg\.tar(\.[a-z0-9]+)?$ ]] || continue
+  name=${BASH_REMATCH[1]}
+  if [[ -n ${newest[$name]:-} ]]; then
+    rm -f -- "$path" "$path.sig"
+    removed=$((removed + 1))
+  else
+    newest[$name]=$file
+    kept=$((kept + 1))
+  fi
+done < <(find "$CACHE" -maxdepth 1 -type f -name '*.pkg.tar*' ! -name '*.sig' \
+  ! -name '*.part' -printf '%T@ %p\0' | sort -z -n -r)
+
+# Interrupted downloads are never resumed across runners.
+find "$CACHE" -maxdepth 1 -type f -name '*.part' -delete
+
+printf 'Package cache: kept %d package(s), removed %d superseded file(s).\n' \
+  "$kept" "$removed"

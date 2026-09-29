@@ -73,7 +73,7 @@ jobs:
           wl_clipboard_rs_repository=${wl_clipboard_rs_repository%.git}
           echo "wl_clipboard_rs_repository=$wl_clipboard_rs_repository" >> "$GITHUB_OUTPUT"
           echo "wl_clipboard_rs_ref=$WL_CLIPBOARD_RS_REF" >> "$GITHUB_OUTPUT"
-          echo "cache_week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+          echo "rust_toolchain=$(rustc --version | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned Omarchy source
         uses: actions/checkout@v7
@@ -122,6 +122,20 @@ jobs:
           file build/dependencies/rift-agent/rift-agent |
             grep -q 'ELF 64-bit.*ARM aarch64.*statically linked'
 
+      # Restored after the checkout above, which would otherwise clean the
+      # target directory. The source is pinned by commit and built --locked, so
+      # the key only has to change with that commit or the runner's toolchain.
+      - name: Restore Wayland clipboard frontend build cache
+        id: wl-copy-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            build/dependencies/wl-clipboard-rs/target
+          key: wl-copy-${{ runner.arch }}-${{ steps.sources.outputs.rust_toolchain }}-${{ steps.sources.outputs.wl_clipboard_rs_ref }}
+
       - name: Build pinned Wayland clipboard frontend
         shell: bash
         run: |
@@ -135,6 +149,20 @@ jobs:
           file build/dependencies/rift-agent/wl-copy |
             grep -q 'ELF 64-bit.*ARM aarch64'
 
+      - name: Save Wayland clipboard frontend build cache
+        if: steps.wl-copy-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            build/dependencies/wl-clipboard-rs/target
+          key: wl-copy-${{ runner.arch }}-${{ steps.sources.outputs.rust_toolchain }}-${{ steps.sources.outputs.wl_clipboard_rs_ref }}
+
+      # Every cached input is verified on use against a pin in sources.env
+      # (rootfs and Node.js by digest, the rootfs signature by fingerprint), so
+      # the key follows sources.env alone and a digest bump is what refreshes it.
       - name: Restore verified rolling inputs
         id: input-cache
         uses: actions/cache/restore@v6
@@ -146,7 +174,20 @@ jobs:
             build/cache/archlinuxarm-rootfs-*.gpg
             build/cache/node-SHASUMS256.txt
             build/cache/node-v*-linux-arm64.tar.gz
-          key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}-${{ steps.sources.outputs.cache_week }}
+          key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}
+
+      # Target packages are signature-checked by pacman inside the image, so a
+      # restored package file is only ever a download that can be skipped. An
+      # older cache is still useful after a pin moves: pacman fetches whatever
+      # changed and keeps the rest.
+      - name: Restore target package cache
+        id: package-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: build/cache/pacman-aarch64
+          key: pacman-aarch64-${{ runner.arch }}-${{ hashFiles('sources.env', 'config/omarchy-packages.aarch64', 'profiles/**') }}
+          restore-keys: |
+            pacman-aarch64-${{ runner.arch }}-
 
       - name: Reclaim hosted-runner disk space
         shell: bash
@@ -159,7 +200,6 @@ jobs:
             /usr/share/dotnet \
             /opt/ghc
           docker system prune --all --force --volumes
-          sudo apt-get update
           df -h /
 
       - name: Set up native Buildx
@@ -184,6 +224,18 @@ jobs:
       - name: Build and verify the sparse raw image
         env:
           OMARCHY_IMAGE_LOW_DISK: '1'
+          # Low-disk mode would delete the package cache before the save step
+          # below can read it. The cache is about 2 GiB on a runner with more
+          # than 100 GiB free, so it is kept; the other transient caches are
+          # still reclaimed.
+          OMARCHY_IMAGE_KEEP_PACKAGE_CACHE: '1'
+          # The release stream is gzip-compressed afterwards, which cannot
+          # shrink extents Btrfs already compressed. Writing them at a higher
+          # zstd level is what makes the download smaller. The installed
+          # system still mounts with zstd:3 from its fstab, and the kernel and
+          # initramfs boot from the FAT ESP, so nothing reads Btrfs before the
+          # kernel's own zstd support does.
+          OMARCHY_IMAGE_BUILD_COMPRESSION: compress-force=zstd:15
         run: |
           set -euo pipefail
           ./bin/build-image-container \
@@ -193,6 +245,17 @@ jobs:
             --force
           (cd build && sha256sum --check omarchy-aarch64-riftvm.raw.sha256)
           df -h /
+
+      - name: Prune superseded packages from the cache
+        if: steps.package-cache.outputs.cache-hit != 'true'
+        run: ./bin/prune-package-cache build/cache/pacman-aarch64 || true
+
+      - name: Save target package cache
+        if: steps.package-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: build/cache/pacman-aarch64
+          key: ${{ steps.package-cache.outputs.cache-primary-key }}
 
       # Save before packaging/upload so a later Release API failure does not
       # discard the already verified rootfs and Node.js inputs.
@@ -207,7 +270,7 @@ jobs:
             build/cache/archlinuxarm-rootfs-*.gpg
             build/cache/node-SHASUMS256.txt
             build/cache/node-v*-linux-arm64.tar.gz
-          key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}-${{ steps.sources.outputs.cache_week }}
+          key: image-inputs-${{ runner.arch }}-${{ hashFiles('sources.env') }}
 
       - name: Package split RiftVM release assets
         env:

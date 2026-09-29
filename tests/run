@@ -910,7 +910,9 @@ HYPRCTL
 pass "RiftVM display watcher holds the mode when the host alternates sizes"
 pass "RiftVM display watcher reacts to virtio-gpu mode changes"
 bash "$ROOT/tests/test-frame-scheduling"
+bash "$ROOT/tests/test-event-wait"
 bash "$ROOT/tests/test-background-check"
+bash "$ROOT/tests/test-build-cache"
 
 (
   fixture=$(mktemp -d)

@@ -95,6 +95,10 @@ exec docker "${DOCKER_ARGS[@]}" \
   --env "HOST_UID=$(id -u)" \
   --env "HOST_GID=$(id -g)" \
   --env "OMARCHY_IMAGE_LOW_DISK=${OMARCHY_IMAGE_LOW_DISK:-0}" \
+  --env "OMARCHY_IMAGE_KEEP_PACKAGE_CACHE=${OMARCHY_IMAGE_KEEP_PACKAGE_CACHE:-0}" \
+  --env "OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=${OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE:-assembly}" \
+  --env "OMARCHY_IMAGE_BUILD_COMPRESSION=${OMARCHY_IMAGE_BUILD_COMPRESSION:-compress=zstd:3}" \
+  --env "OMARCHY_IMAGE_BUILDER_FULL_UPGRADE=${OMARCHY_IMAGE_BUILDER_FULL_UPGRADE:-0}" \
   "$BUILDER_IMAGE" \
   bash -lc '
     set -euo pipefail
@@ -102,6 +106,8 @@ exec docker "${DOCKER_ARGS[@]}" \
       chown -R "$HOST_UID:$HOST_GID" /project/build
     }
     trap restore_ownership EXIT
-    pacman -Syu --needed --noconfirm btrfs-progs dosfstools parted
+    # Installs btrfs-progs, dosfstools and parted when the builder lacks them.
+    source /project/lib/builder-tools.sh
+    ensure_builder_tools
     /project/bin/build-image "$@"
   ' build-image "${CONTAINER_ARGS[@]}"

@@ -49,6 +49,13 @@ readonly REQUEST_SETTLE_TICKS="${OMARCHY_RIFTVM_REQUEST_SETTLE_TICKS:-3}"
 # flat colour cannot put the watcher in a loop.
 readonly REQUEST_RETRY_LIMIT="${OMARCHY_RIFTVM_REQUEST_RETRY_LIMIT:-3}"
 readonly REQUEST_RETRY_TICKS="${OMARCHY_RIFTVM_REQUEST_RETRY_TICKS:-8}"
+# Opt-in, off by default: while nothing is pending, wait for a DRM uevent
+# instead of waking every poll interval. A poll still happens at least every
+# EVENT_MAX_WAIT seconds, so a resize that arrives without a uevent is only
+# noticed later, never missed. Not yet qualified in a real guest.
+readonly EVENT_DRIVEN="${OMARCHY_RIFTVM_EVENT_DRIVEN:-0}"
+readonly EVENT_MAX_WAIT="${OMARCHY_RIFTVM_EVENT_MAX_WAIT:-5}"
+readonly UDEVADM="${OMARCHY_RIFTVM_UDEVADM:-udevadm}"
 
 now_seconds() {
   printf '%s\n' "${EPOCHSECONDS:-$(date +%s)}"
@@ -61,7 +68,8 @@ log_debug() {
   # precisely when an offline image inspection is most useful.
   local line
   printf -v line '%(%FT%T%z)T %s' -1 "$*"
-  printf '%s\n' "$line" | tee -a "$LOG_FILE" 8>&-
+  printf '%s\n' "$line"
+  printf '%s\n' "$line" >>"$LOG_FILE"
 }
 
 discover_hyprland_instance() {
@@ -497,6 +505,97 @@ watch_tick() {
   fi
 }
 
+# Event-driven idle wait (opt-in). The tick counters above are the watcher's
+# clock: the settle window, the repaint delay and the audit are all counted in
+# polls. Events therefore only replace the sleep while every counter except the
+# audit is at rest; as soon as anything is pending the watcher is back on the
+# normal poll interval, so a burst of uevents cannot shorten a settle window.
+drm_event_fd=""
+drm_event_pid=""
+event_max_wait_ticks=0
+
+start_drm_event_monitor() {
+  [[ $EVENT_DRIVEN == 1 ]] || return 1
+  if [[ ! $POLL_INTERVAL =~ ^[1-9][0-9]*$ || ! $EVENT_MAX_WAIT =~ ^[1-9][0-9]*$ ]] ||
+    (( EVENT_MAX_WAIT < POLL_INTERVAL )); then
+    log_debug "event-driven wait needs whole-second intervals (poll=$POLL_INTERVAL max=$EVENT_MAX_WAIT); polling"
+    return 1
+  fi
+  if ! command -v "$UDEVADM" >/dev/null 2>&1; then
+    log_debug "event-driven wait requested but $UDEVADM is unavailable; polling"
+    return 1
+  fi
+  # The monitor must not inherit the instance lock, or an orphan would keep a
+  # restarted watcher from starting.
+  coproc DRM_EVENTS { exec "$UDEVADM" monitor --udev --subsystem-match=drm 2>/dev/null 8>&-; }
+  if [[ -z ${DRM_EVENTS_PID:-} || -z ${DRM_EVENTS[0]:-} ]]; then
+    log_debug "DRM event monitor did not start; polling"
+    return 1
+  fi
+  drm_event_pid=$DRM_EVENTS_PID
+  # Bash drops the coprocess descriptors when the monitor exits; a private
+  # copy turns that into an ordinary end-of-file instead.
+  if ! exec {drm_event_fd}<&"${DRM_EVENTS[0]}"; then
+    kill "$drm_event_pid" 2>/dev/null
+    drm_event_fd=""
+    log_debug "DRM event monitor is unreadable; polling"
+    return 1
+  fi
+  event_max_wait_ticks=$((EVENT_MAX_WAIT / POLL_INTERVAL))
+  trap 'kill "$drm_event_pid" 2>/dev/null || :' EXIT
+  log_debug "waiting for DRM events while idle, polling at least every ${EVENT_MAX_WAIT}s"
+}
+
+# 0: a DRM event arrived. 2: the wait timed out. 1: the monitor is gone.
+wait_for_drm_event() {
+  local status=0
+  read -r -t "$1" -u "$drm_event_fd" _ || status=$?
+  if (( status > 128 )); then
+    return 2
+  elif (( status != 0 )); then
+    return 1
+  fi
+  # One resize raises several uevents; they are one wake-up.
+  while read -r -t 0 -u "$drm_event_fd" && read -r -t 1 -u "$drm_event_fd" _; do
+    :
+  done
+  return 0
+}
+
+watcher_is_idle() {
+  (( settle_ticks == 0 && ticks_until_repaint == 0 && repaint_pending == 0 &&
+    ticks_until_requested_check == 0 && ticks_until_audit > 1 )) &&
+    [[ ! -e $CHECK_REQUEST ]]
+}
+
+# Returns when the monitor is lost, which hands over to the polling loop.
+run_event_driven_loop() {
+  local wait_ticks started elapsed_ticks status
+  while :; do
+    if watcher_is_idle; then
+      wait_ticks=$ticks_until_audit
+      (( wait_ticks > event_max_wait_ticks )) && wait_ticks=$event_max_wait_ticks
+      started=$SECONDS
+      status=0
+      wait_for_drm_event $((wait_ticks * POLL_INTERVAL)) || status=$?
+      if (( status == 1 )); then
+        log_debug "DRM event monitor ended; polling every ${POLL_INTERVAL}s"
+        return 0
+      fi
+      # Keep the audit on wall-clock time: the tick below accounts for one
+      # poll, so credit the rest of the polls this wait replaced.
+      elapsed_ticks=$(( (SECONDS - started) / POLL_INTERVAL ))
+      (( elapsed_ticks > wait_ticks )) && elapsed_ticks=$wait_ticks
+      if (( elapsed_ticks > 1 )); then
+        ticks_until_audit=$((ticks_until_audit - elapsed_ticks + 1))
+      fi
+    else
+      sleep "$POLL_INTERVAL" || return 0
+    fi
+    watch_tick
+  done
+}
+
 install -d -m 0700 "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
 log_debug "watcher starting: drm_root=$DRM_ROOT"
@@ -520,6 +619,9 @@ previous=$(mode_signature)
 log_debug "initial DRM signature: $previous"
 watch_tick
 startup_background_check
+if start_drm_event_monitor; then
+  run_event_driven_loop
+fi
 while sleep "$POLL_INTERVAL"; do
   watch_tick
 done

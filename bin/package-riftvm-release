@@ -20,6 +20,26 @@ file_size() {
   printf '%s\n' "$size"
 }
 
+# The image build publishes <image>.sha256 after hashing the finished image,
+# and hashing a 64 GiB disk again takes about as long as compressing it. Reuse
+# that digest only when it names this image and the image has not been written
+# since; anything else is hashed here. OMARCHY_RIFTVM_REHASH_IMAGE=1 always
+# hashes.
+image_digest() {
+  local sidecar="$IMAGE_PATH.sha256" recorded="" name=""
+
+  if [[ ${OMARCHY_RIFTVM_REHASH_IMAGE:-0} != 1 && -f $sidecar && ! -L $sidecar &&
+    ! $IMAGE_PATH -nt $sidecar ]]; then
+    read -r recorded name <"$sidecar" || true
+    if [[ $recorded =~ ^[0-9a-f]{64}$ && $name == "${IMAGE_PATH##*/}" ]]; then
+      printf 'Using the image digest recorded by the build.\n' >&2
+      printf '%s\n' "$recorded"
+      return
+    fi
+  fi
+  sha256sum "$IMAGE_PATH" | awk '{print $1}'
+}
+
 while (($#)); do
   case $1 in
     --tag) RELEASE_TAG=${2:?}; shift 2 ;;
@@ -74,7 +94,7 @@ while IFS= read -r part; do parts+=("$part"); done < <(
   find "$OUTPUT_DIR" -maxdepth 1 -type f -name 'Omarchy-riftvm.sparse.gz.part-*' -print | sort
 )
 ((${#parts[@]} > 0)) || fail "compression produced no parts"
-image_sha=$(sha256sum "$IMAGE_PATH" | awk '{print $1}')
+image_sha=$(image_digest)
 image_size=$(file_size "$IMAGE_PATH")
 image_name=${IMAGE_PATH##*/}
 [[ $image_name =~ ^[A-Za-z0-9._-]+$ ]] || fail "image filename contains unsupported characters"

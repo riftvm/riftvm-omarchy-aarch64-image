@@ -137,6 +137,21 @@ Useful options:
   --force
 ```
 
+Build behaviour can be tuned through the environment; `build-image-container`
+passes each of these into the builder:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OMARCHY_IMAGE_BUILD_COMPRESSION` | `compress=zstd:3` | Btrfs option for the build-time mounts only. `compress=zstd[:1-15]` or `compress-force=zstd[:1-15]`. The installed system's fstab always stays on `compress=zstd:3`. The release workflow uses `compress-force=zstd:15` for a smaller download. |
+| `OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE` | `assembly` | `assembly` keeps `build/cache/pacman-aarch64` mounted until the last step that downloads packages. `install` mounts it for the first package installation only, as earlier builds did. |
+| `OMARCHY_IMAGE_LOW_DISK` | `0` | `1` deletes transient caches before the raw image is packaged. |
+| `OMARCHY_IMAGE_KEEP_PACKAGE_CACHE` | `0` | `1` keeps the package cache in low-disk mode, for a runner that saves it afterwards. |
+| `OMARCHY_IMAGE_BUILDER_FULL_UPGRADE` | `0` | `1` upgrades the whole builder container (`pacman -Syu`) before the build, as earlier builds did. By default only the missing image tools are installed; see `lib/builder-tools.sh`. |
+
+`bin/package-riftvm-release` reuses the digest in `<image>.sha256` when that
+file names the image and is not older than it. `OMARCHY_RIFTVM_REHASH_IMAGE=1`
+hashes the image again regardless.
+
 The default output is:
 
 ```text
@@ -175,6 +190,9 @@ Package a local RiftVM Release layout:
   restarting the shell.
 - **Frame scheduling.** Hyprland's `debug:vfr` is left alone; see
   [demand rendering](docs/demand-rendering.md).
+- **Polling.** The watcher reads the DRM mode list once a second. Waiting for
+  DRM events instead is available as an opt-in that is not yet qualified; see
+  [display watcher polling](docs/display-watcher-polling.md).
 
 ## Tests
 
