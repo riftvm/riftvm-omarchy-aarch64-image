@@ -331,6 +331,9 @@ fi
   grep -qxF 'SigLevel = Required DatabaseOptional' \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
     fail "official 4.0.6 repository does not require signed packages"
+  [[ $(grep -nF 'Include = /etc/pacman.d/omarchy-aarch64.conf' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) \
+     -gt $(grep -nF '[core]' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) ]] ||
+    fail "official repository would select an ABI-incompatible Hyprland before Arch Linux ARM"
   bash -n "$MOUNT_DIR/etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/omarchy-aarch64-repository"
 
   for package in kdenlive libreoffice-fresh moonlight-qt hyprsunset gpu-screen-recorder; do

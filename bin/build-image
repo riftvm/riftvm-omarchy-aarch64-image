@@ -894,7 +894,9 @@ Server = $server
 EOF
 
   if ! grep -qxF "$include" "$pacman_conf"; then
-    sed -i "0,/^\[core\]/s||$include\n\n[core]|" "$pacman_conf"
+    # Arch Linux ARM's rolling Hyprland and libraries must be selected as one
+    # ABI-compatible set before the stable Omarchy repository is searched.
+    printf '\n%s\n' "$include" >>"$pacman_conf"
   fi
 
   cat >"$hook" <<'EOF'
@@ -910,10 +912,11 @@ readonly INCLUDE='Include = /etc/pacman.d/omarchy-aarch64.conf'
 # The official settings package currently ships an x86-only multilib stanza.
 # Arch Linux ARM needs alarm instead, including after Omarchy refreshes pacman.
 sudo sed -i '/^\[multilib\]$/,/^Include = \/etc\/pacman.d\/mirrorlist$/c\[alarm]\nInclude = /etc/pacman.d/mirrorlist' "$CONF"
-# The official template already embeds its own signed [omarchy] repository.
-grep -q '^\[omarchy\]$' "$CONF" && exit 0
+# The official template puts [omarchy] before Arch Linux ARM. Move that
+# repository after the rolling ARM repositories to keep Hyprland's ABI matched.
+sudo sed -i '/^\[omarchy\]$/,/^$/d' "$CONF"
 grep -qxF "$INCLUDE" "$CONF" && exit 0
-sudo sed -i "0,/^\[core\]/s||$INCLUDE\n\n[core]|" "$CONF"
+printf '\n%s\n' "$INCLUDE" | sudo tee -a "$CONF" >/dev/null
 EOF
   chmod 755 "$hook"
 }
