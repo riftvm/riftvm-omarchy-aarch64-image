@@ -481,11 +481,10 @@ if grep -Eq '^[[:space:]]*(protocol: linux|path: boot\(\):/Image|module_path:)' 
   "$OMARCHY_TEST_SOURCE/default/limine/limine.conf"; then
   fail "the AArch64 fork still carries a static kernel/initramfs boot entry"
 fi
-for package in limine-mkinitcpio-hook; do
-  grep -qx "$package" "$ROOT/config/omarchy-packages.aarch64" ||
-    fail "signed repository package is not selected: $package"
-done
-pass "aarch64-virt consumes its adapted Limine package from the signed repository"
+grep -Fq 'retry_target_pacman -S --needed --noconfirm limine-mkinitcpio-hook' \
+  "$ROOT/bin/build-image" ||
+  fail "official signed Limine mkinitcpio hook is not selected"
+pass "aarch64-virt consumes its adapted Limine package from the official signed repository"
 
 grep -Fq 'plymouth-set-default-theme omarchy' "$ROOT/bin/build-image" ||
   fail "image assembly does not explicitly select the Omarchy boot theme"
