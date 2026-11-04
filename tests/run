@@ -328,6 +328,9 @@ fi
   grep -qxF "Server = $OMARCHY_OFFICIAL_REPOSITORY_URL" \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
     fail "official 4.0.6 repository cannot be selected after compatibility bootstrap"
+  grep -qxF 'SigLevel = Required DatabaseOptional' \
+    "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
+    fail "official 4.0.6 repository does not require signed packages"
   bash -n "$MOUNT_DIR/etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/omarchy-aarch64-repository"
 
   for package in kdenlive libreoffice-fresh moonlight-qt hyprsunset gpu-screen-recorder; do
