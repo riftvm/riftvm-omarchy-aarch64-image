@@ -31,8 +31,6 @@ validate_omarchy_source() {
   [[ $top == "$source" ]] || fail "Omarchy source must be its repository root: $source"
   [[ -f $source/install/omarchy-base.packages ]] ||
     fail "Omarchy source lacks install/omarchy-base.packages: $source"
-  [[ -f $source/default/pacman/pacman-aarch64.conf ]] ||
-    fail "Omarchy source lacks its AArch64 pacman configuration: $source"
 }
 
 resolve_omarchy_source() {

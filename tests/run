@@ -34,7 +34,6 @@ while IFS= read -r script; do
 done < <(find "$ROOT/bin" -type f -print; find "$ROOT/profiles" -type f -perm -111 -print)
 bash -n "$OMARCHY_TEST_SOURCE/install/user/mise-work.sh"
 bash -n "$OMARCHY_TEST_SOURCE/install/hardware/all.sh"
-bash -n "$OMARCHY_TEST_SOURCE/install/hardware/virtual-machine.sh"
 bash -n "$OMARCHY_TEST_SOURCE/install/post-install/pacman.sh"
   bash -n "$OMARCHY_TEST_SOURCE/bin/omarchy-provision-owner"
   grep -q 'failed to discard unused Btrfs extents' "$ROOT/bin/build-image" ||
@@ -406,7 +405,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
   trap 'rm -rf "$fixture"' EXIT
   packages_json=$(
     read_list "$ROOT/config/omarchy-packages.aarch64" |
-      jq -R --arg version "$OMARCHY_AARCH64_PACKAGE_VERSION" '
+      jq -R --arg version "$OMARCHY_COMPAT_PACKAGE_VERSION" '
         {name: ., version: (if . == "omarchy" then
           $version
         else "1-1" end)}
@@ -432,7 +431,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
     ' >"$fixture/repository-manifest.json"
   OMARCHY_SOURCE_COMMIT=$OMARCHY_AARCH64_REF
   validate_omarchy_repository_manifest "$fixture/repository-manifest.json"
-  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_AARCH64_PACKAGE_VERSION" ]] ||
+  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_COMPAT_PACKAGE_VERSION" ]] ||
     fail "repository/source version boundary was not captured"
 
   jq -n \
@@ -452,7 +451,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
       }
     ' >"$fixture/repository-manifest-v1.json"
   validate_omarchy_repository_manifest "$fixture/repository-manifest-v1.json"
-  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_AARCH64_PACKAGE_VERSION" ]] ||
+  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_COMPAT_PACKAGE_VERSION" ]] ||
     fail "schema-1 repository/source version boundary was not captured"
   pass "signed stable repository manifests are complete and match the pinned Omarchy source"
 )
@@ -1145,8 +1144,7 @@ pass "container isolation, mount cleanup, ownership, and repository update bound
 grep -q '^ConditionPathExists=/var/lib/omarchy/provisioning/pending$' \
   "$OMARCHY_TEST_SOURCE/install/provisioning/omarchy-provision-owner.service" ||
   fail "first-boot provisioning is not gated by its pending marker"
-bash "$OMARCHY_TEST_SOURCE/test/shell.d/aarch64-runtime-test.sh"
-pass "fork exposes the deferred AArch64 VM runtime contract"
+pass "official Omarchy source exposes deferred first-boot provisioning"
 
 if grep -R -nE 'asahi-alarm|grub-install' \
   "$ROOT/bin" "$ROOT/config" "$ROOT/profiles" >/dev/null; then

@@ -78,7 +78,7 @@ jobs:
       - name: Checkout pinned Omarchy source
         uses: actions/checkout@v7
         with:
-          repository: riverscn/omarchy-aarch64
+          repository: omacom/omarchy
           ref: ${{ steps.sources.outputs.omarchy_ref }}
           path: build/dependencies/omarchy-aarch64
           persist-credentials: false
