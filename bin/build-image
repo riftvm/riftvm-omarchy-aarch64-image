@@ -1227,7 +1227,7 @@ configure_limine() {
   if grep -Eq '^==> ERROR:|^ERROR:' <<<"$boot_output"; then
     fail "the final AArch64 UKI build reported an error despite exiting successfully"
   fi
-  [[ -f $MOUNT_DIR/boot/EFI/Linux/omarchy_linux.efi ]] ||
+  [[ -f $MOUNT_DIR/boot/EFI/Linux/omarchy_linux-aarch64.efi ]] ||
     fail "limine-update did not generate the Omarchy AArch64 UKI"
   target_chroot /usr/local/sbin/omarchy-riftvm-ensure-bootable
   target_chroot btrfs quota disable / >/dev/null 2>&1 ||
@@ -1338,7 +1338,7 @@ validate_target() {
   )
   local -a required_paths=(
     boot/EFI/BOOT/BOOTAA64.EFI
-    boot/EFI/Linux/omarchy_linux.efi
+    boot/EFI/Linux/omarchy_linux-aarch64.efi
     boot/EFI/limine/limine_aa64.efi
     boot/limine.conf
     etc/default/limine
@@ -1391,14 +1391,14 @@ validate_target() {
   done
   [[ -f $MOUNT_DIR/boot/Image ]] ||
     fail "target validation failed: Arch Linux ARM kernel is missing"
-  file "$MOUNT_DIR/boot/EFI/Linux/omarchy_linux.efi" |
+  file "$MOUNT_DIR/boot/EFI/Linux/omarchy_linux-aarch64.efi" |
     grep -q 'PE32+ executable for EFI (application), ARM64' ||
     fail "target validation failed: the Omarchy UKI is not an AArch64 EFI application"
   grep -q 'protocol: efi' "$MOUNT_DIR/boot/limine.conf" ||
     fail "target validation failed: Limine has no generated EFI/UKI entry"
-  grep -q 'EFI/Linux/omarchy_linux.efi' "$MOUNT_DIR/boot/limine.conf" ||
+  grep -q 'EFI/Linux/omarchy_linux-aarch64.efi' "$MOUNT_DIR/boot/limine.conf" ||
     fail "target validation failed: Limine does not reference the Omarchy UKI"
-  cmp -s "$MOUNT_DIR/boot/EFI/Linux/omarchy_linux.efi" \
+  cmp -s "$MOUNT_DIR/boot/EFI/Linux/omarchy_linux-aarch64.efi" \
     "$MOUNT_DIR/boot/EFI/BOOT/BOOTAA64.EFI" ||
     fail "target validation failed: EFI fallback does not directly boot the Omarchy UKI"
   grep -q '^Theme=omarchy$' "$MOUNT_DIR/etc/plymouth/plymouthd.conf" ||
@@ -1408,7 +1408,7 @@ validate_target() {
   grep -q 'plymouth' "$MOUNT_DIR/etc/mkinitcpio.conf.d/omarchy_hooks.conf" ||
     fail "target validation failed: the Omarchy mkinitcpio hooks omit Plymouth"
   assert_target_boot_hooks_restored
-  initramfs_listing=$(target_chroot lsinitcpio /boot/EFI/Linux/omarchy_linux.efi) ||
+  initramfs_listing=$(target_chroot lsinitcpio /boot/EFI/Linux/omarchy_linux-aarch64.efi) ||
     fail "target validation failed: cannot inspect the generated UKI"
   grep -Fq 'usr/bin/plymouthd' <<<"$initramfs_listing" ||
     fail "target validation failed: Plymouth is missing from the generated initramfs"

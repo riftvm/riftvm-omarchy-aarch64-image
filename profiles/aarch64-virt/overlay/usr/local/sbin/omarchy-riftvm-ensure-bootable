@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-uki=/boot/EFI/Linux/omarchy_linux.efi
+uki=/boot/EFI/Linux/omarchy_linux-aarch64.efi
 fallback=/boot/EFI/BOOT/BOOTAA64.EFI
 temporary=${fallback}.new
 
