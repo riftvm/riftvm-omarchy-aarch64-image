@@ -35,6 +35,7 @@ load_builder() {
   rm -rf "$MOUNT_DIR" "$PROJECT_ROOT/build"
   mkdir -p "$MOUNT_DIR/var/cache/pacman/pkg" "$MOUNT_DIR/etc/ssh" \
     "$MOUNT_DIR/var/lib/systemd" "$MOUNT_DIR/root"
+  printf '[core]\nInclude = /etc/pacman.d/mirrorlist\n' >"$MOUNT_DIR/etc/pacman.conf"
   : >"$calls"
   mount() { printf 'mount %s\n' "$*" >>"$calls"; }
   umount() { printf 'umount %s\n' "$*" >>"$calls"; }

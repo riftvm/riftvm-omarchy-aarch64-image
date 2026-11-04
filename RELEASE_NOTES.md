@@ -1,6 +1,8 @@
 ## Omarchy factory for RiftVM
 
-This is the ARM64 Omarchy factory image used by the RiftVM app.
+This is the ARM64 Omarchy 4.0.6 factory image used by the RiftVM app. It uses
+the official Omarchy 4.0.6 source and signed AArch64 packages, with RiftVM's
+ARM64 virtual-machine integration.
 **Requires macOS 27 or later and an Apple silicon Mac.**
 
 Install the app with `brew install --cask riftvm/tap/riftvm`, or download it

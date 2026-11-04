@@ -34,8 +34,9 @@ while IFS= read -r script; do
 done < <(find "$ROOT/bin" -type f -print; find "$ROOT/profiles" -type f -perm -111 -print)
 bash -n "$OMARCHY_TEST_SOURCE/install/user/mise-work.sh"
 bash -n "$OMARCHY_TEST_SOURCE/install/hardware/all.sh"
-bash -n "$OMARCHY_TEST_SOURCE/install/hardware/virtual-machine.sh"
 bash -n "$OMARCHY_TEST_SOURCE/install/post-install/pacman.sh"
+bash -n "$ROOT/profiles/aarch64-virt/overlay/usr/share/omarchy/install/hardware/all.sh"
+bash -n "$ROOT/profiles/aarch64-virt/overlay/usr/share/omarchy/install/hardware/virtual-machine.sh"
   bash -n "$OMARCHY_TEST_SOURCE/bin/omarchy-provision-owner"
   grep -q 'failed to discard unused Btrfs extents' "$ROOT/bin/build-image" ||
     fail "image build does not require a successful final filesystem trim"
@@ -323,6 +324,16 @@ fi
   grep -qxF "Server = $OMARCHY_AARCH64_REPOSITORY_URL" \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
     fail "development builds do not restore the public update repository"
+  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  grep -qxF "Server = $OMARCHY_OFFICIAL_REPOSITORY_URL" \
+    "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
+    fail "official 4.0.6 repository cannot be selected after compatibility bootstrap"
+  grep -qxF 'SigLevel = Required DatabaseOptional' \
+    "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
+    fail "official 4.0.6 repository does not require signed packages"
+  [[ $(grep -nF 'Include = /etc/pacman.d/omarchy-aarch64.conf' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) \
+     -gt $(grep -nF '[core]' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) ]] ||
+    fail "official repository would select an ABI-incompatible Hyprland before Arch Linux ARM"
   bash -n "$MOUNT_DIR/etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/omarchy-aarch64-repository"
 
   for package in kdenlive libreoffice-fresh moonlight-qt hyprsunset gpu-screen-recorder; do
@@ -335,9 +346,11 @@ fi
       fail "aarch64-virt still excludes an upstream development package: $package"
     fi
   done
-  for package in dotnet-runtime-bin obsidian pinta tensaku tzupdate ufw-docker tobi-try; do
-    grep -qx "$package" "$ROOT/config/omarchy-packages.aarch64" ||
-      fail "required Omarchy repository package is not selected: $package"
+  grep -qx 'dotnet-runtime dotnet-runtime-bin' "$PROFILE_DIR/package-replacements" ||
+    fail "official dotnet runtime replacement is not selected"
+  for package in obsidian pinta tensaku tzupdate ufw-docker tobi-try; do
+    grep -qx "$package" "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
+      fail "required official Omarchy desktop package is not selected: $package"
   done
   for package in dotnet-runtime obsidian pinta tensaku tzupdate; do
     if grep -qx "$package" "$PROFILE_DIR/excluded-packages"; then
@@ -405,8 +418,8 @@ pass "AArch64 repository and exclusion manifests are disjoint"
   fixture=$(mktemp -d)
   trap 'rm -rf "$fixture"' EXIT
   packages_json=$(
-    read_list "$ROOT/config/omarchy-packages.aarch64" |
-      jq -R --arg version "$OMARCHY_AARCH64_PACKAGE_VERSION" '
+    { read_list "$ROOT/config/omarchy-packages.aarch64"; printf 'omarchy\n'; } |
+      jq -R --arg version "$OMARCHY_COMPAT_PACKAGE_VERSION" '
         {name: ., version: (if . == "omarchy" then
           $version
         else "1-1" end)}
@@ -432,7 +445,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
     ' >"$fixture/repository-manifest.json"
   OMARCHY_SOURCE_COMMIT=$OMARCHY_AARCH64_REF
   validate_omarchy_repository_manifest "$fixture/repository-manifest.json"
-  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_AARCH64_PACKAGE_VERSION" ]] ||
+  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_COMPAT_PACKAGE_VERSION" ]] ||
     fail "repository/source version boundary was not captured"
 
   jq -n \
@@ -452,7 +465,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
       }
     ' >"$fixture/repository-manifest-v1.json"
   validate_omarchy_repository_manifest "$fixture/repository-manifest-v1.json"
-  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_AARCH64_PACKAGE_VERSION" ]] ||
+  [[ $OMARCHY_REPOSITORY_OMARCHY_VERSION == "$OMARCHY_COMPAT_PACKAGE_VERSION" ]] ||
     fail "schema-1 repository/source version boundary was not captured"
   pass "signed stable repository manifests are complete and match the pinned Omarchy source"
 )
@@ -474,17 +487,16 @@ if grep -Eq '^[[:space:]]*(protocol: linux|path: boot\(\):/Image|module_path:)' 
   "$OMARCHY_TEST_SOURCE/default/limine/limine.conf"; then
   fail "the AArch64 fork still carries a static kernel/initramfs boot entry"
 fi
-for package in limine-mkinitcpio-hook; do
-  grep -qx "$package" "$ROOT/config/omarchy-packages.aarch64" ||
-    fail "signed repository package is not selected: $package"
-done
-pass "aarch64-virt consumes its adapted Limine package from the signed repository"
+grep -Fq 'retry_target_pacman -S --needed --noconfirm limine-mkinitcpio-hook' \
+  "$ROOT/bin/build-image" ||
+  fail "official signed Limine mkinitcpio hook is not selected"
+pass "aarch64-virt consumes its adapted Limine package from the official signed repository"
 
 grep -Fq 'plymouth-set-default-theme omarchy' "$ROOT/bin/build-image" ||
   fail "image assembly does not explicitly select the Omarchy boot theme"
 grep -Fq 'LIMINE_FORCE_UEFI=yes limine-update' "$ROOT/bin/build-image" ||
   fail "image assembly does not build the AArch64 UKI inside its offline chroot"
-grep -Fq 'boot/EFI/Linux/omarchy_linux.efi' "$ROOT/bin/build-image" ||
+grep -Fq 'boot/EFI/Linux/omarchy_linux-aarch64.efi' "$ROOT/bin/build-image" ||
   fail "image validation does not require the stable Omarchy UKI"
 grep -Fq 'omarchy-riftvm-ensure-bootable' "$ROOT/bin/build-image" ||
   fail "image assembly does not install a direct Omarchy UKI fallback"
@@ -493,7 +505,7 @@ grep -Fq 'EFI/BOOT/BOOTAA64.EFI' "$ROOT/bin/build-image" ||
 grep -Fq 'Target = limine' \
   "$ROOT/profiles/aarch64-virt/overlay/usr/share/libalpm/hooks/zzzz-omarchy-riftvm-boot-fallback.hook" ||
   fail "system updates do not refresh the RiftVM EFI fallback"
-grep -Fq 'EFI/Linux/omarchy_linux.efi' \
+grep -Fq 'EFI/Linux/omarchy_linux-aarch64.efi' \
   "$ROOT/profiles/aarch64-virt/overlay/usr/local/sbin/omarchy-riftvm-ensure-bootable" ||
   fail "the fallback repair helper does not source the Omarchy UKI"
 grep -Fq "grep -Eq '^==> ERROR:|^ERROR:'" "$ROOT/bin/build-image" ||
@@ -593,7 +605,7 @@ pass "raw image candidates remain draft for macOS factory signing and native acc
   fail "the upstream check must run on request, not on a schedule"
 grep -Fq 'workflow_dispatch:' "$ROOT/.github/workflows/release-image.yml" &&
   grep -Fq 'repos/omacom/omarchy/releases/latest' "$ROOT/.github/workflows/check-omarchy-upstream.yml" &&
-  grep -Fq 'repos/riverscn/omarchy-aarch64/git/matching-refs/tags/' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
+  grep -Fq 'https://pkgs.omarchy.org/stable/aarch64/' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
   fail "image builds and the upstream check must stay manually dispatchable"
 if grep -R -Fq 'everettjf/omarchy-aarch64-image' "$ROOT/.github" "$ROOT/bin"; then
   fail "active image automation still accesses the personal legacy repository"
@@ -1145,8 +1157,10 @@ pass "container isolation, mount cleanup, ownership, and repository update bound
 grep -q '^ConditionPathExists=/var/lib/omarchy/provisioning/pending$' \
   "$OMARCHY_TEST_SOURCE/install/provisioning/omarchy-provision-owner.service" ||
   fail "first-boot provisioning is not gated by its pending marker"
-bash "$OMARCHY_TEST_SOURCE/test/shell.d/aarch64-runtime-test.sh"
-pass "fork exposes the deferred AArch64 VM runtime contract"
+pass "official Omarchy source exposes deferred first-boot provisioning"
+grep -Fq 'OMARCHY_HARDWARE_PROFILE:-} == "aarch64-virt"' \
+  "$ROOT/profiles/aarch64-virt/overlay/usr/share/omarchy/install/hardware/all.sh" ||
+  fail "official Omarchy system setup would run x86 hardware scripts in the ARM VM"
 
 if grep -R -nE 'asahi-alarm|grub-install' \
   "$ROOT/bin" "$ROOT/config" "$ROOT/profiles" >/dev/null; then
