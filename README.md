@@ -10,26 +10,34 @@ so RiftVM virtualizes it without cross-architecture CPU emulation.
 
 ## Release pipeline
 
-This repository is one part of a three-repository AArch64 release pipeline:
+This repository assembles Omarchy 4.0.6 from these pinned inputs:
 
-- [`riverscn/omarchy-aarch64`](https://github.com/riverscn/omarchy-aarch64)
-  maintains the AArch64 runtime adaptation of Omarchy.
+- [`omacom/omarchy`](https://github.com/omacom/omarchy) supplies the official
+  4.0.6 source and first-boot setup.
+- [Omarchy's AArch64 package repository](https://pkgs.omarchy.org/stable/aarch64/)
+  supplies the signed 4.0.6 `omarchy` and `omarchy-settings` packages.
 - [`riverscn/omarchy-pkgs-aarch64`](https://github.com/riverscn/omarchy-pkgs-aarch64)
-  builds and publishes the signed stable AArch64 pacman repository.
-- This repository assembles the RiftVM disk image from Arch Linux ARM and that
-  signed repository.
+  supplies the signed RiftVM SPICE compatibility package and native image
+  builder. This repository retains the AArch64 VM hardware adaptation.
+- Arch Linux ARM supplies the AArch64 kernel, Hyprland, and its matching
+  graphics libraries.
 
-The builder downloads the latest package Release manifest and public key on
-every build. It rejects the snapshot unless:
+The builder verifies the compatibility repository's signed Release manifest
+and public key before installing its VM package. It rejects the snapshot unless:
 
 - the manifest uses the expected stable AArch64 schema;
 - its signing fingerprint matches the fingerprint pinned in `sources.env`;
-- every selected package is present;
-- the published `omarchy` package matches the pinned source commit; and
-- pacman verifies the signed database and packages.
+- the selected compatibility packages are present;
+- the compatibility package version matches its pin; and
+- pacman verifies package signatures.
 
-The installed image keeps the signed repository enabled, so Arch Linux ARM and
-Omarchy update together:
+The official repository's package versions are pinned in `sources.env`.
+Pacman verifies its package signatures; its database is not signed, matching
+the official repository configuration. The builder restores the AArch64 pacman
+configuration after Omarchy applies its settings.
+
+The installed image keeps the official signed Omarchy package repository
+enabled alongside Arch Linux ARM, so both update together:
 
 ```bash
 sudo pacman -Syu
@@ -132,7 +140,7 @@ Useful options:
 ./bin/build-image-container --size 80G --force
 ./bin/build-image-container --refresh --force
 ./bin/build-image-container \
-  --omarchy-source ../omarchy-aarch64 \
+  --omarchy-source ../omarchy \
   --omarchy-repository ../omarchy-pkgs-aarch64/pkgs.omarchy.org/stable/aarch64 \
   --force
 ```
@@ -196,11 +204,11 @@ Package a local RiftVM Release layout:
 
 ## Tests
 
-Run the static contract and release-packager suite with the adapted Omarchy
+Run the static contract and release-packager suite with the official Omarchy
 source as a sibling checkout:
 
 ```bash
-OMARCHY_TEST_SOURCE=../omarchy-aarch64 ./tests/run
+OMARCHY_TEST_SOURCE=../omarchy ./tests/run
 ```
 
 The suite verifies script syntax, package boundaries, signed repository
