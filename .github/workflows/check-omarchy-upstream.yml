@@ -29,14 +29,7 @@ jobs:
             echo "Factory source already tracks official Omarchy $official_tag."
             exit 0
           fi
-          arm_port_tag=$(gh api \
-            "repos/riverscn/omarchy-aarch64/git/matching-refs/tags/v${official_version}-aarch64" \
-            --jq 'map(.ref | split("/")[-1]) | sort | last // ""')
-          if [[ -n "$arm_port_tag" ]]; then
-            arm_port_status="A matching ARM64 port tag is available: **${arm_port_tag}**. Resolve it to an immutable commit and run the complete local and native VM acceptance gates before changing the Factory pin."
-          else
-            arm_port_status="No matching ARM64 port tag is published yet. Keep the current Factory pin; do not substitute the upstream x86-oriented source for the reviewed ARM64 port."
-          fi
+          arm_port_status="Review the signed official AArch64 packages at https://pkgs.omarchy.org/stable/aarch64/, pin the release commit, and run the complete native VM acceptance gates before changing the Factory pin."
           {
             echo "## Omarchy update available"
             echo "Official: ${official_tag}; factory source: ${OMARCHY_AARCH64_VERSION}."
@@ -56,4 +49,4 @@ jobs:
           Port and review the AArch64 release, update immutable source/package refs, build a draft Factory image, and pass clean-workspace, input, display, sharing, update, and rollback acceptance before promotion.
 
           Official release: https://github.com/omacom/omarchy/releases/tag/${official_tag}
-          ARM64 port: https://github.com/riverscn/omarchy-aarch64/tags"
+          AArch64 packages: https://pkgs.omarchy.org/stable/aarch64/"

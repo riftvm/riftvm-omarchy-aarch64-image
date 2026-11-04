@@ -599,7 +599,7 @@ pass "raw image candidates remain draft for macOS factory signing and native acc
   fail "the upstream check must run on request, not on a schedule"
 grep -Fq 'workflow_dispatch:' "$ROOT/.github/workflows/release-image.yml" &&
   grep -Fq 'repos/omacom/omarchy/releases/latest' "$ROOT/.github/workflows/check-omarchy-upstream.yml" &&
-  grep -Fq 'repos/riverscn/omarchy-aarch64/git/matching-refs/tags/' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
+  grep -Fq 'https://pkgs.omarchy.org/stable/aarch64/' "$ROOT/.github/workflows/check-omarchy-upstream.yml" ||
   fail "image builds and the upstream check must stay manually dispatchable"
 if grep -R -Fq 'everettjf/omarchy-aarch64-image' "$ROOT/.github" "$ROOT/bin"; then
   fail "active image automation still accesses the personal legacy repository"
