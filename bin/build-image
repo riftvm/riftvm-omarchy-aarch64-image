@@ -933,8 +933,7 @@ configure_package_manager() {
 }
 
 install_packages() {
-  local package
-  local -a official_packages=() repo_install_packages=()
+  local -a official_packages=()
 
   mapfile -t official_packages < <(
     resolve_official_packages \
@@ -945,37 +944,28 @@ install_packages() {
       "$PROFILE_DIR/runtime-packages"
   )
   ((${#official_packages[@]} > 0)) || fail "resolved official package set is empty"
-  while IFS= read -r package; do
-    case $package in
-      omarchy-aarch64-keyring | limine-mkinitcpio-hook) ;;
-      *) repo_install_packages+=("$package") ;;
-    esac
-  done < <(read_list "$CONFIG_DIR/omarchy-packages.aarch64")
-
   mount_package_cache
-  log "Installing ${#official_packages[@]} Arch Linux ARM packages and the repository keyring"
-  retry_target_pacman -Syu --needed --noconfirm "${official_packages[@]}"
-  target_chroot pacman-key --populate omarchy-aarch64
+  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  log "Installing ${#official_packages[@]} Arch Linux ARM packages and official Omarchy 4.0.6"
+  mask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
+  retry_target_pacman -Syu --needed --noconfirm \
+    "${official_packages[@]}" omarchy omarchy-settings
+  unmask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
 
   log "Installing the Limine mkinitcpio hook from the signed Omarchy repository"
   mask_target_boot_hooks "${LIMINE_INSTALL_HOOKS[@]}"
   retry_target_pacman -S --needed --noconfirm limine-mkinitcpio-hook
   unmask_target_boot_hooks "${LIMINE_INSTALL_HOOKS[@]}"
 
-  if ((${#repo_install_packages[@]} > 0)); then
-    log "Installing ${#repo_install_packages[@]} packages from the signed Omarchy repository"
-    mask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
-    retry_target_pacman -S --needed --noconfirm "${repo_install_packages[@]}"
-    unmask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
-  fi
-
-  # The compatibility repository supplies the VM-specific AArch64 packages.
-  # Switch to the official signed repository for the final 4.0.6 runtime and
-  # future Omarchy updates after those packages are installed.
-  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  # The SPICE compatibility package is the only runtime package absent from
+  # the official repository. Its dependencies are already installed from the
+  # official set, so no old desktop stack is pulled into the image.
+  write_omarchy_repository_configuration "$OMARCHY_BUILD_REPOSITORY_URL"
   mask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
-  retry_target_pacman -Syu --needed --noconfirm omarchy omarchy-settings
+  retry_target_pacman -Sy --needed --noconfirm omarchy-spice-guest-tools
   unmask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
+  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  retry_target_pacman -Sy --noconfirm
   # By default the cache stays mounted for the later assembly steps that also
   # download packages (omarchy-apply-system); main() unmounts it before the
   # image is cleaned. OMARCHY_IMAGE_PACKAGE_CACHE_SCOPE=install restores the

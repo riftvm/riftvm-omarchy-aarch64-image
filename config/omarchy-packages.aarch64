@@ -1,30 +1,4 @@
-# Packages installed and updated from the signed [omarchy] AArch64 repository.
+# VM-only packages from the signed compatibility repository. The Omarchy
+# desktop and general packages come from the official signed repository.
 omarchy-aarch64-keyring
-omarchy-keyring
-limine-mkinitcpio-hook
-limine-snapper-sync
-omarchy-settings
-omarchy
 omarchy-spice-guest-tools
-aether
-cliamp
-dotnet-runtime-bin
-herdr
-localsend
-mise-bin
-obsidian
-omacalc
-omacut
-omawrite
-omarchy-nvim
-pinta
-tensaku
-ttfx
-tobi-try
-ttf-ia-writer
-ttf-jetbrains-mono-nerd-basic
-tzupdate
-ufw-docker
-xdg-terminal-exec
-yaru-icon-theme
-yay

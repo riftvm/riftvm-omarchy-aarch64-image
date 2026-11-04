@@ -340,9 +340,11 @@ fi
       fail "aarch64-virt still excludes an upstream development package: $package"
     fi
   done
-  for package in dotnet-runtime-bin obsidian pinta tensaku tzupdate ufw-docker tobi-try; do
-    grep -qx "$package" "$ROOT/config/omarchy-packages.aarch64" ||
-      fail "required Omarchy repository package is not selected: $package"
+  grep -qx 'dotnet-runtime dotnet-runtime-bin' "$PROFILE_DIR/package-replacements" ||
+    fail "official dotnet runtime replacement is not selected"
+  for package in obsidian pinta tensaku tzupdate ufw-docker tobi-try; do
+    grep -qx "$package" "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
+      fail "required official Omarchy desktop package is not selected: $package"
   done
   for package in dotnet-runtime obsidian pinta tensaku tzupdate; do
     if grep -qx "$package" "$PROFILE_DIR/excluded-packages"; then
@@ -410,7 +412,7 @@ pass "AArch64 repository and exclusion manifests are disjoint"
   fixture=$(mktemp -d)
   trap 'rm -rf "$fixture"' EXIT
   packages_json=$(
-    read_list "$ROOT/config/omarchy-packages.aarch64" |
+    { read_list "$ROOT/config/omarchy-packages.aarch64"; printf 'omarchy\n'; } |
       jq -R --arg version "$OMARCHY_COMPAT_PACKAGE_VERSION" '
         {name: ., version: (if . == "omarchy" then
           $version
