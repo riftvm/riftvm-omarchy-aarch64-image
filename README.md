@@ -90,7 +90,7 @@ brew install --cask riftvm/tap/riftvm
 ```
 
 Or download the app from [GitHub Releases](https://github.com/riftvm/riftvm/releases/latest).
-Open RiftVM and choose **Prepare Omarchy**. See [riftvm.com](https://riftvm.com) for details.
+Open RiftVM and choose **Prepare Omarchy**. See [riftvm.com](https://atomsprout.com/riftvm) for details.
 
 The App prepares one Omarchy machine from an exact, signed factory manifest. It
 verifies the Ed25519 signature and every image part, keeps a read-only factory
