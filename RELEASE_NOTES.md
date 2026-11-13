@@ -20,4 +20,4 @@ The app pins an exact release URL. Sparse-stream exports are for developer
 import tools; users do not need to concatenate or import parts manually.
 
 Package inventories and image provenance are included for reproducibility.
-See the [website](https://riftvm.com) for installation and requirements.
+See the [website](https://atomsprout.com/riftvm/) for installation and requirements.
