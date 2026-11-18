@@ -348,6 +348,8 @@ fi
   done
   grep -qx 'dotnet-runtime dotnet-runtime-bin' "$PROFILE_DIR/package-replacements" ||
     fail "official dotnet runtime replacement is not selected"
+  grep -qx 'vi vim' "$PROFILE_DIR/package-replacements" ||
+    fail "Arch Linux ARM replacement for vi is not selected"
   for package in obsidian pinta tzupdate ufw-docker tobi-try; do
     grep -qx "$package" "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
       fail "required official Omarchy desktop package is not selected: $package"
