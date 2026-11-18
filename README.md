@@ -10,12 +10,12 @@ so RiftVM virtualizes it without cross-architecture CPU emulation.
 
 ## Release pipeline
 
-This repository assembles Omarchy 4.0.6 from these pinned inputs:
+This repository assembles Omarchy 4.5.0 from these pinned inputs:
 
 - [`omacom/omarchy`](https://github.com/omacom/omarchy) supplies the official
-  4.0.6 source and first-boot setup.
+  4.5.0 source and first-boot setup.
 - [Omarchy's AArch64 package repository](https://pkgs.omarchy.org/stable/aarch64/)
-  supplies the signed 4.0.6 `omarchy` and `omarchy-settings` packages.
+  supplies the signed `4.5.0-3` builds of `omarchy` and `omarchy-settings`.
 - [`riverscn/omarchy-pkgs-aarch64`](https://github.com/riverscn/omarchy-pkgs-aarch64)
   supplies the signed RiftVM SPICE compatibility package and native image
   builder. This repository retains the AArch64 VM hardware adaptation.

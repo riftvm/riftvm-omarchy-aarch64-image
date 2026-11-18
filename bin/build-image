@@ -957,7 +957,7 @@ install_packages() {
   ((${#official_packages[@]} > 0)) || fail "resolved official package set is empty"
   mount_package_cache
   write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
-  log "Installing ${#official_packages[@]} Arch Linux ARM packages and official Omarchy 4.0.6"
+  log "Installing ${#official_packages[@]} Arch Linux ARM packages and official Omarchy $OMARCHY_AARCH64_PACKAGE_VERSION"
   mask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
   retry_target_pacman -Syu --needed --noconfirm \
     "${official_packages[@]}" omarchy omarchy-settings
@@ -1137,15 +1137,15 @@ stage_first_boot_provisioning() {
   # "back", and the owner is sent to the keyboard page indefinitely.
   #
   # zone1970.tab is shipped by tzdata, contains the canonical selectable zone
-  # names, and needs neither D-Bus nor the network. Patch both picker branches
+  # names, and needs neither D-Bus nor the network. Patch the shared picker
   # in the pinned runtime copy and fail the image build if the upstream shape
   # changes, rather than silently shipping the looping form again.
   # shellcheck disable=SC2016 # This is shell source inserted into setup-form.sh.
   local timezone_source='awk '\''!/^#/ { print $3 }'\'' /usr/share/zoneinfo/zone1970.tab | sort -u'
   local timezone_occurrences
   timezone_occurrences=$(grep -Fc 'timedatectl list-timezones' "$setup_form")
-  ((timezone_occurrences == 2)) ||
-    fail "expected two timedatectl timezone picker inputs, found $timezone_occurrences"
+  ((timezone_occurrences == 1)) ||
+    fail "expected one timedatectl timezone picker input, found $timezone_occurrences"
   sed -i.bak "s@timedatectl list-timezones@$timezone_source@g" "$setup_form"
   rm -f -- "$setup_form.bak"
 
@@ -1178,10 +1178,10 @@ stage_first_boot_provisioning() {
   perl -0pi.bak -e 's{source "\$OMARCHY_PATH/install/provisioning/setup-form.sh"}{source "\$OMARCHY_PATH/install/provisioning/setup-form.sh"\nsource /usr/local/libexec/riftvm-owner-provisioning}' "$owner"
   rm -f -- "$owner.bak"
 
-  run_setup_occurrences=$(perl -0ne '$count = () = /run_setup\(\) \{\n  local status\n\n  while true; do/g; print $count' "$owner")
+  run_setup_occurrences=$(perl -0ne '$count = () = /run_setup\(\) \{\n  local status\n\n  platform_ready \|\| return 1\n\n  while true; do/g; print $count' "$owner")
   ((run_setup_occurrences == 1)) ||
     fail "expected one interactive run_setup entry, found $run_setup_occurrences"
-  perl -0pi.bak -e 's~run_setup\(\) \{\n  local status\n\n  while true; do~run_setup() {\n  local status=0 automated=\${RIFTVM_OWNER_AUTOMATED:-0}\n\n  while (( ! automated )); do~' "$owner"
+  perl -0pi.bak -e 's~(run_setup\(\) \{\n  local status\n\n  platform_ready \|\| return 1\n\n)  while true; do~$1  while (( ! \${RIFTVM_OWNER_AUTOMATED:-0} )); do~' "$owner"
   rm -f -- "$owner.bak"
 
   # The upstream entry point blocks on a tty greeter before run_setup. Wait for
@@ -1432,7 +1432,7 @@ validate_target() {
     fail "target validation failed: the Omarchy AArch64 signing key is not trusted"
   target_chroot pacman -Q omarchy-aarch64-keyring omarchy-keyring omarchy omarchy-settings \
     limine limine-mkinitcpio-hook limine-snapper-sync plymouth snapper \
-    power-profiles-daemon \
+    omarchy-power-profiles-daemon \
     gst-plugin-pipewire pipewire pipewire-alsa \
     pipewire-audio pipewire-jack pipewire-pulse wireplumber >/dev/null
   while IFS= read -r package; do

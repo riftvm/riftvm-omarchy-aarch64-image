@@ -80,8 +80,8 @@ pass "all project and modified runtime scripts parse as Bash"
   setup_form="$MOUNT_DIR/usr/share/omarchy/install/provisioning/setup-form.sh"
   ! grep -Fq 'timedatectl list-timezones' "$setup_form" ||
     fail "staged first-boot form still queries timezones through D-Bus"
-  [[ $(grep -Fc "zone1970.tab | sort -u" "$setup_form") == 2 ]] ||
-    fail "staged first-boot form does not use the local timezone database twice"
+  [[ $(grep -Fc "zone1970.tab | sort -u" "$setup_form") == 1 ]] ||
+    fail "staged first-boot form does not use the local timezone database"
   bash -n "$setup_form"
   owner="$MOUNT_DIR/usr/bin/omarchy-provision-owner"
   [[ $(grep -Fc 'RiftVM: keep the first-boot greeter static and resize-safe' "$owner") == 1 ]] ||
@@ -91,7 +91,7 @@ pass "all project and modified runtime scripts parse as Bash"
     fail "staged first-boot owner does not load the RiftVM provisioning consumer"
   grep -Fq 'riftvm_wait_owner_provisioning && RIFTVM_OWNER_AUTOMATED=1' "$owner" ||
     fail "staged first-boot owner does not check authenticated RiftVM setup before the greeter"
-  grep -Fq 'local status=0 automated=${RIFTVM_OWNER_AUTOMATED:-0}' "$owner" ||
+  grep -Fq 'while (( ! ${RIFTVM_OWNER_AUTOMATED:-0} )); do' "$owner" ||
     fail "staged first-boot owner does not carry authenticated setup into run_setup"
   riftvm_check_line=$(grep -nF 'riftvm_wait_owner_provisioning && RIFTVM_OWNER_AUTOMATED=1' "$owner" | cut -d: -f1)
   greeter_line=$(grep -nF '  greeter_screen' "$owner" | tail -1 | cut -d: -f1)
@@ -327,10 +327,10 @@ fi
   write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
   grep -qxF "Server = $OMARCHY_OFFICIAL_REPOSITORY_URL" \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
-    fail "official 4.0.6 repository cannot be selected after compatibility bootstrap"
+    fail "official Omarchy repository cannot be selected after compatibility bootstrap"
   grep -qxF 'SigLevel = Required DatabaseOptional' \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
-    fail "official 4.0.6 repository does not require signed packages"
+    fail "official Omarchy repository does not require signed packages"
   [[ $(grep -nF 'Include = /etc/pacman.d/omarchy-aarch64.conf' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) \
      -gt $(grep -nF '[core]' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) ]] ||
     fail "official repository would select an ABI-incompatible Hyprland before Arch Linux ARM"
@@ -348,18 +348,18 @@ fi
   done
   grep -qx 'dotnet-runtime dotnet-runtime-bin' "$PROFILE_DIR/package-replacements" ||
     fail "official dotnet runtime replacement is not selected"
-  for package in obsidian pinta tensaku tzupdate ufw-docker tobi-try; do
+  for package in obsidian pinta tzupdate ufw-docker tobi-try; do
     grep -qx "$package" "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
       fail "required official Omarchy desktop package is not selected: $package"
   done
-  for package in dotnet-runtime obsidian pinta tensaku tzupdate; do
+  for package in dotnet-runtime obsidian pinta tzupdate; do
     if grep -qx "$package" "$PROFILE_DIR/excluded-packages"; then
       fail "supported AArch64 desktop package remains excluded: $package"
     fi
   done
-  grep -qx 'power-profiles-daemon' "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
-    fail "the pinned Omarchy source no longer declares power-profiles-daemon"
-  if grep -qx 'power-profiles-daemon' "$PROFILE_DIR/excluded-packages"; then
+  grep -qx 'omarchy-power-profiles-daemon' "$OMARCHY_TEST_SOURCE/install/omarchy-base.packages" ||
+    fail "the pinned Omarchy source no longer declares omarchy-power-profiles-daemon"
+  if grep -qx 'omarchy-power-profiles-daemon' "$PROFILE_DIR/excluded-packages"; then
     fail "aarch64-virt excludes the service required by Omarchy setup"
   fi
   for package in gst-plugin-pipewire pipewire pipewire-alsa pipewire-audio pipewire-jack \
@@ -371,7 +371,7 @@ fi
   shell_defaults=$(jq -f "$PROFILE_DIR/shell-defaults.jq" \
     "$OMARCHY_TEST_SOURCE/config/omarchy/shell.json")
   jq -e '
-    ([.bar.layout.left[], .bar.layout.center[], .bar.layout.right[]]
+    ([.bar.layout[][]]
       | map(select(.id == "omarchy.indicators"))[0].items)
       == ["Dictation", "Reminder", "Dnd", "StayAwake"]
     and (.disabledPlugins | index("omarchy.nightlight") != null)
@@ -542,7 +542,7 @@ pass "the complete Omarchy UKI, primary Limine, and Plymouth boot experience is 
   fail "the VM profile still ships its own automatic direct-boot helper"
 ! grep -Fq 'omarchy-aarch64-setup-direct-boot' "$ROOT/bin/build-image" ||
   fail "image assembly still registers direct UKI boot automatically"
-grep -Fq 'gum confirm "Setup direct boot' "$OMARCHY_TEST_SOURCE/bin/omarchy-setup-direct-boot" ||
+grep -Eq 'gum confirm .*omarchy-i18n directBoot\.setup' "$OMARCHY_TEST_SOURCE/bin/omarchy-setup-direct-boot" ||
   fail "the upstream user-selected Direct Boot command is unavailable"
 pass "Limine is the default path and direct UKI boot remains user-selected"
 
@@ -1150,7 +1150,7 @@ grep -Fq 'etc/udev/rules.d/70-riftvm-input.rules' "$ROOT/bin/build-image" ||
   fail "target validation does not require the RiftVM input rules"
 grep -Fq "zone1970.tab | sort -u" "$ROOT/bin/build-image" ||
   fail "first-boot timezone selection still depends on the early system bus"
-grep -Fq "expected two timedatectl timezone picker inputs" "$ROOT/bin/build-image" ||
+grep -Fq "expected one timedatectl timezone picker input" "$ROOT/bin/build-image" ||
   fail "timezone picker patch does not fail closed when the fork changes"
 pass "container isolation, mount cleanup, ownership, and repository update boundaries are guarded"
 
