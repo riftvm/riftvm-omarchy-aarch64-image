@@ -93,6 +93,13 @@ pass "all project and modified runtime scripts parse as Bash"
     fail "staged first-boot owner does not check authenticated RiftVM setup before the greeter"
   grep -Fq 'while (( ! ${RIFTVM_OWNER_AUTOMATED:-0} )); do' "$owner" ||
     fail "staged first-boot owner does not carry authenticated setup into run_setup"
+  awk '
+    /^[[:space:]]+limine-update$/ {
+      getline
+      restored = ($0 ~ /^[[:space:]]+\/usr\/local\/sbin\/omarchy-riftvm-ensure-bootable$/)
+    }
+    END { exit !restored }
+  ' "$owner" || fail "first boot leaves Limine in the RiftVM EFI fallback path"
   riftvm_check_line=$(grep -nF 'riftvm_wait_owner_provisioning && RIFTVM_OWNER_AUTOMATED=1' "$owner" | cut -d: -f1)
   greeter_line=$(grep -nF '  greeter_screen' "$owner" | tail -1 | cut -d: -f1)
   [[ $riftvm_check_line =~ ^[0-9]+$ && $greeter_line =~ ^[0-9]+$ &&

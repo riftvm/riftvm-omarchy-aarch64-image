@@ -1206,6 +1206,16 @@ stage_first_boot_provisioning() {
   perl -0pi.bak -e 's~main\(\) \{\n~main() {\n  local riftvm_status=0\n  riftvm_wait_owner_provisioning \&\& RIFTVM_OWNER_AUTOMATED=1 || riftvm_status=\$?\n  (( riftvm_status <= 1 )) || return "\$riftvm_status"\n  if (( \${RIFTVM_OWNER_AUTOMATED:-0} )); then\n    (run_setup) \&\& return 0\n    say "Automated setup failed. Check \$LOG_FILE and retry from this root console."\n    exec /bin/bash\n  fi\n\n~' "$owner"
   rm -f -- "$owner.bak"
 
+  # Refreshing the entry for the VM's new machine ID also reinstalls Limine
+  # at the UEFI fallback path. Restore direct UKI boot with the regenerated UKI
+  # before provisioning clears its pending marker.
+  local limine_update_occurrences
+  limine_update_occurrences=$(grep -Ec '^[[:space:]]+limine-update$' "$owner")
+  ((limine_update_occurrences == 1)) ||
+    fail "expected one provisioning Limine refresh, found $limine_update_occurrences"
+  perl -0pi.bak -e 's{^([ \t]+)limine-update$}{$1limine-update\n$1/usr/local/sbin/omarchy-riftvm-ensure-bootable}m' "$owner"
+  rm -f -- "$owner.bak"
+
   install -d -m755 "$provisioning/packages" "$wants"
   install -m644 "$NODE_TARBALL" "$provisioning/packages/${NODE_TARBALL##*/}"
   install -m644 "$unit_source" "$unit_target"
