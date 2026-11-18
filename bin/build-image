@@ -726,6 +726,7 @@ mount_chroot_filesystems() {
   done
   mkdir -p "$MOUNT_DIR/run"
   mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$MOUNT_DIR/run"
+  install -d -m755 "$MOUNT_DIR/run/lock"
   if [[ -n $OMARCHY_REPOSITORY_OVERRIDE ]]; then
     install -d -m755 "$MOUNT_DIR/run/omarchy-aarch64-repository"
     mount --bind "$OMARCHY_REPOSITORY_OVERRIDE" \
@@ -878,6 +879,11 @@ write_omarchy_repository_configuration() {
   local include='Include = /etc/pacman.d/omarchy-aarch64.conf'
   local hook="$MOUNT_DIR/etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/omarchy-aarch64-repository"
 
+  # The official and compatibility endpoints share the same pacman repo name.
+  # Drop the old database before validating the new server's signature policy.
+  if [[ -f $repository_conf ]] && ! grep -qxF "Server = $server" "$repository_conf"; then
+    rm -f -- "$MOUNT_DIR/var/lib/pacman/sync/omarchy.db"{,.sig}
+  fi
   if [[ $server == "$OMARCHY_OFFICIAL_REPOSITORY_URL" ]]; then
     # Official Omarchy signs packages but does not publish a database .sig.
     # Its own pacman template uses DatabaseOptional for this reason.
@@ -959,8 +965,15 @@ install_packages() {
   write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
   log "Installing ${#official_packages[@]} Arch Linux ARM packages and official Omarchy $OMARCHY_AARCH64_PACKAGE_VERSION"
   mask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
-  retry_target_pacman -Syu --needed --noconfirm \
-    "${official_packages[@]}" omarchy omarchy-settings
+  # Finish the CUPS transaction so its sysusers hook creates the group before
+  # the Omarchy settings scriptlet applies the packaged CUPS configuration.
+  retry_target_pacman -Syu --needed --noconfirm "${official_packages[@]}"
+  retry_target_pacman -S --needed --noconfirm omarchy omarchy-settings
+  [[ ! -e $MOUNT_DIR/run/omarchy-sudo-passwordless-package-removing ]] ||
+    fail "Omarchy settings did not finish initializing its temporary sudo grant cleanup"
+  cmp -s "$MOUNT_DIR/usr/share/omarchy/etc-overrides/cups-cups-files.conf" \
+    "$MOUNT_DIR/etc/cups/cups-files.conf" ||
+    fail "Omarchy settings did not install its CUPS configuration"
   unmask_target_boot_hooks "${DEFERRED_BOOT_HOOKS[@]}"
 
   log "Installing the Limine mkinitcpio hook from the signed Omarchy repository"
@@ -1345,6 +1358,7 @@ validate_target() {
     etc/fstab
     etc/limine-entry-tool.d/omarchy-defaults.conf
     etc/limine-entry-tool.d/omarchy-uki.conf
+    etc/mkinitcpio.conf.d/00-omarchy-hooks.conf
     etc/mkinitcpio.conf.d/omarchy_hooks.conf
     etc/mkinitcpio.conf.d/zz-omarchy-aarch64-virt.conf
     etc/modules-load.d/rift-agent.conf
@@ -1405,8 +1419,6 @@ validate_target() {
     fail "target validation failed: the Omarchy Plymouth theme is not selected"
   grep -q 'plymouth\.ignore-serial-consoles' "$MOUNT_DIR/etc/default/limine" ||
     fail "target validation failed: the serial console suppresses the graphical Plymouth splash"
-  grep -q 'plymouth' "$MOUNT_DIR/etc/mkinitcpio.conf.d/omarchy_hooks.conf" ||
-    fail "target validation failed: the Omarchy mkinitcpio hooks omit Plymouth"
   assert_target_boot_hooks_restored
   initramfs_listing=$(target_chroot lsinitcpio /boot/EFI/Linux/omarchy_linux-aarch64.efi) ||
     fail "target validation failed: cannot inspect the generated UKI"

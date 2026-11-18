@@ -331,6 +331,18 @@ fi
   grep -qxF 'SigLevel = Required DatabaseOptional' \
     "$MOUNT_DIR/etc/pacman.d/omarchy-aarch64.conf" ||
     fail "official Omarchy repository does not require signed packages"
+  sync_dir="$MOUNT_DIR/var/lib/pacman/sync"
+  mkdir -p "$sync_dir"
+  touch "$sync_dir/omarchy.db"
+  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  [[ -f $sync_dir/omarchy.db ]] || fail "unchanged repository loses its database"
+  write_omarchy_repository_configuration
+  [[ ! -e $sync_dir/omarchy.db ]] ||
+    fail "compatibility repository reuses the unsigned official database"
+  touch "$sync_dir/omarchy.db" "$sync_dir/omarchy.db.sig"
+  write_omarchy_repository_configuration "$OMARCHY_OFFICIAL_REPOSITORY_URL"
+  [[ ! -e $sync_dir/omarchy.db && ! -e $sync_dir/omarchy.db.sig ]] ||
+    fail "official repository reuses the compatibility database or signature"
   [[ $(grep -nF 'Include = /etc/pacman.d/omarchy-aarch64.conf' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) \
      -gt $(grep -nF '[core]' "$MOUNT_DIR/etc/pacman.conf" | cut -d: -f1) ]] ||
     fail "official repository would select an ABI-incompatible Hyprland before Arch Linux ARM"
