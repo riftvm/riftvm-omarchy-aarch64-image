@@ -1475,7 +1475,7 @@ validate_target() {
   [[ $(<"$MOUNT_DIR/etc/omarchy-aarch64/profile") == "$IMAGE_PROFILE" ]] ||
     fail "target validation failed: image profile marker is incorrect"
   jq --exit-status '
-    ([.bar.layout.left[], .bar.layout.center[], .bar.layout.right[]]
+    ([.bar.layout[][]]
       | map(select(.id == "omarchy.indicators"))[0].items)
       == ["Dictation", "Reminder", "Dnd", "StayAwake"]
     and (.disabledPlugins | index("omarchy.nightlight") != null)
