@@ -43,10 +43,20 @@ load_builder() {
     [[ $1 != getent ]] || return 1
     printf 'chroot %s\n' "$*" >>"$calls"
   }
-  retry_target_pacman() { printf 'pacman %s\n' "${*:1:3}" >>"$calls"; }
+  retry_target_pacman() {
+    printf 'pacman %s\n' "$*" >>"$calls"
+    if [[ $* == '-S --needed --noconfirm omarchy omarchy-settings' ]]; then
+      grep -Fxq 'pacman -Syu --needed --noconfirm base cups' "$calls" ||
+        fail "Omarchy settings were installed before the base and CUPS transaction"
+      local overrides="$MOUNT_DIR/usr/share/omarchy/etc-overrides"
+      mkdir -p "$overrides" "$MOUNT_DIR/etc/cups"
+      printf 'SystemGroup cups-browsed sys root\n' >"$overrides/cups-cups-files.conf"
+      cp "$overrides/cups-cups-files.conf" "$MOUNT_DIR/etc/cups/cups-files.conf"
+    fi
+  }
   mask_target_boot_hooks() { :; }
   unmask_target_boot_hooks() { :; }
-  resolve_official_packages() { printf 'base\n'; }
+  resolve_official_packages() { printf 'base\ncups\n'; }
   log() { :; }
   warn() { printf 'warn %s\n' "$*" >>"$calls"; }
   OMARCHY_SOURCE_DIR="$fixture/source"
