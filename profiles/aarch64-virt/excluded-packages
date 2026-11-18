@@ -17,5 +17,8 @@ kdenlive
 libreoffice-fresh
 moonlight-qt
 obs-studio
+# The signed Omarchy titlebars plug-in requires Hyprland 0.56.2. Keep the
+# matching Arch Linux ARM graphics stack. Floating mode can skip titlebars.
+omarchy-hyprland-titlebars
 qemu-user-static-binfmt
 wireless-regdb

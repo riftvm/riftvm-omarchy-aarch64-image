@@ -336,7 +336,8 @@ fi
     fail "official repository would select an ABI-incompatible Hyprland before Arch Linux ARM"
   bash -n "$MOUNT_DIR/etc/skel/.config/omarchy/hooks/pre-refresh-pacman.d/omarchy-aarch64-repository"
 
-  for package in kdenlive libreoffice-fresh moonlight-qt hyprsunset gpu-screen-recorder; do
+  for package in kdenlive libreoffice-fresh moonlight-qt hyprsunset gpu-screen-recorder \
+    omarchy-hyprland-titlebars; do
     grep -qx "$package" "$PROFILE_DIR/excluded-packages" ||
       fail "aarch64-virt still installs unsupported/oversized package: $package"
   done

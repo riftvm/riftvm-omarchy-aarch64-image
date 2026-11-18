@@ -5,6 +5,9 @@ AArch64 packages (`4.5.0-3`), with RiftVM's
 ARM64 virtual-machine integration.
 **Requires macOS 27 or later and an Apple silicon Mac.**
 
+The image omits Omarchy's floating-window titlebar plug-in because it requires
+Hyprland 0.56.2 and RiftVM uses the Arch Linux ARM graphics stack.
+
 Install the app with `brew install --cask riftvm/tap/riftvm`, or download it
 from [RiftVM Releases](https://github.com/riftvm/riftvm/releases/latest).
 Choose **Create Omarchy Workspace** in the app; it downloads and verifies the
@@ -20,4 +23,4 @@ The app pins an exact release URL. Sparse-stream exports are for developer
 import tools; users do not need to concatenate or import parts manually.
 
 Package inventories and image provenance are included for reproducibility.
-See the [website](https://riftvm.com) for installation and requirements.
+See the [website](https://atomsprout.com/riftvm/) for installation and requirements.
